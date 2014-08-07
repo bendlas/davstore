@@ -10,19 +10,31 @@
             [clojure.repl :refer :all]
             [clojure.pprint :refer :all]))
 
-(def test-uri "datomic:mem://davstore-test")
-(def test-blobstore (make-store "/tmp/davstore-test"))
-
-(set! *warn-on-reflection* true)
-
-(def root-id :davstore.container/root)
-
-(declare conn path-entry insert-testdata)
+(defmacro spy [& exprs]
+  (let [args (butlast exprs)
+        expr (last exprs)]
+    `(do 
+       ~@(for [arg args]
+           `(let [res# ~arg]
+              (pprint '~arg)
+              (println "=>")
+              (pprint res#)))
+       (let [res# ~expr]
+         (pprint '~expr)
+         (println "=>")
+         (pprint res#)
+         res#))))
 
 (def zero-sha1 (apply str (repeat 40 \0)))
 
-(defn get-entry [db path]
-  (path-entry db root-id path))
+(defn store-db [{:keys [db conn]}]
+  (if db
+    db
+    (do (log/debug "Store not opened, getting current snapshot")
+        (d/db conn))))
+
+(defn get-entry [{:keys [root path-entry] :as store} path]
+  (path-entry (store-db store) root path))
 
 (defn xor-bytes [^bytes a1 ^bytes a2]
   (amap a1 i _ (unchecked-byte (bit-xor (aget a1 i)
@@ -46,12 +58,11 @@
                                first))
                  (sort-by first))
         _ (with-open [w (OutputStreamWriter. bao "UTF-8")]
-            (binding [*out* w
-                      *print-dup* false]
+            (binding [*out* w]
               (doseq [[k v] kvs]
-                (assert (#{String Long clojure.lang.Keyword} (class v))
+                (assert (#{String Long clojure.lang.Keyword java.util.UUID} (class v))
                         (str "Unexpected " (pr-str v)))
-                (println k v))))
+                (println (str k) (str v)))))
         hb (.toByteArray bao)
         ehash (.digest (MessageDigest/getInstance "SHA-1")
                        hb)
@@ -69,50 +80,42 @@
     (log/debug "Final hash for entity" (:db/id entry) ":" res)
     res))
 
-(defn touch-tx [db path mime-type current-entry-sha1 blob-sha1]
+(defmacro deffileop [name verb [store-sym path-sym & args] & body]
+  `(defn ~name [store# path# ~@args]
+     (if (zero? (count path#))
+       {:error :method-not-allowed
+        :message (str "Can't " ~verb " to root")}
+       (let [~store-sym (assoc store# :db (store-db store#))
+             ~path-sym path#]
+         ~@body))))
+
+(deffileop touch! "PUT" [{:keys [conn db root] :as store} path mime-type current-entry-sha1 blob-sha1]
   (let [name (last path)
         entry {:davstore.entry/name name
                :davstore.entry/type :davstore.entry.type/file
                :davstore.file.content/sha1 blob-sha1
-               :davstore.file.content/mime-type mime-type}]
-    [[:davstore.fn/cu-tx root-id (butlast path) name
-      :davstore.entry.type/file current-entry-sha1 (calc-sha1 entry) entry]]))
-
-(defn mkdir-tx [db path]
-  (let [name (last path)
-        entry {:davstore.entry/name name
-               :davstore.entry/type :davstore.entry.type/container}]
-    [[:davstore.fn/cu-tx root-id (butlast path) name
-      nil nil (calc-sha1 entry) entry]]))
-
-(defn touch! [conn db path mime-type current-entry-sha1 blob-sha1]
-  (if (zero? (count path))
-    {:error :method-not-allowed
-     :message "Can't PUT to root"}
-    (let [tx (touch-tx db path mime-type current-entry-sha1 blob-sha1)
-          res @(transact conn tx)]
-      (log/debug "File touch success" res)
-      (if (get-entry db path)
-        {:success :updated}
-        {:success :created}))))
-
-(defn mkdir! [conn db path]
-  (if (zero? (count path))
-    {:error :method-not-allowed
-     :message "Can't PUT to root"}
-    (let [tx (mkdir-tx db path)
-          res @(transact conn tx)]
-      (log/debug "Mkdir success" res)
+               :davstore.file.content/mime-type mime-type}
+        res @(transact conn [[:davstore.fn/cu-tx root (butlast path) name :davstore.entry.type/file 
+                              current-entry-sha1 (calc-sha1 entry) entry]])]
+    (log/debug "File touch success" res)
+    (if (get-entry store path)
+      {:success :updated}
       {:success :created})))
 
-(defn rm! [conn db path current-entry-sha1 recursive]
-  (if (zero? (count path))
-    {:error :method-not-allowed
-     :message "Can't DELETE to root"}
-    (let [tx [[:davstore.fn/rm-tx root-id path current-entry-sha1 recursive]]
-          res @(transact conn tx)]
-      (log/debug "rm success" res)
-      {:success :deleted})))
+
+(deffileop mkdir! "MKCOLL" [{:keys [conn db root]} path]
+  (let [name (last path)
+        entry {:davstore.entry/name name
+               :davstore.entry/type :davstore.entry.type/container}
+        res @(transact conn [[:davstore.fn/cu-tx root (butlast path) name
+                              nil nil (calc-sha1 entry) entry]])]
+    (log/debug "Mkdir success" res)
+    {:success :created}))
+
+(deffileop rm! "DELETE" [{:keys [conn db root]} path current-entry-sha1 recursive]
+  (let [res @(transact conn [[:davstore.fn/rm-tx root path current-entry-sha1 recursive]])]
+    (log/debug "rm success" res)
+    {:success :deleted}))
 
 (defn- ls-seq [{:keys [davstore.entry/name
                        davstore.container/children]
@@ -125,44 +128,75 @@
           (when (pos? depth)
             (mapcat #(ls-seq % path (dec depth)) children)))))
 
-(defn ls [db path depth]
-  (when-let [e (get-entry db path)]
+(defn ls [store path depth]
+  (when-let [e (get-entry store path)]
     (ls-seq e [] depth)))
 
-(defn cat [db store path]
-  (when-let [sha1 (:davstore.file.content/sha1 (get-entry db path))]
-    (println (slurp (sha-file store sha1)))))
+(defn cat [store path]
+  (when-let [sha1 (:davstore.file.content/sha1 (get-entry store path))]
+    (println (slurp (sha-file (:blob-store store) sha1)))))
 
 ;; init
 
-(defn open-store! [db-uri]
-  (let [created (create-database db-uri)
-        conn (connect db-uri)
-        entity {:db/doc "File root singleton"
-                :db/id (tempid :db.part/davstore.entries)
-                :db/ident root-id
-                :davstore.entry/name ""
-                :davstore.entry/type :davstore.entry.type/container}]
-    (when created
-      @(transact conn schema)
-      @(transact conn [(assoc entity :davstore.entry/sha1 (calc-sha1 entity))]))
-    (let [db (d/db conn)]
-      (def path-entry (:db/fn (d/entity db :davstore.fn/path-entry)))
-      (def conn conn))))
+(def root-id :davstore.container/root)
 
-(defn- store-str [blob-store ^String s]
-  (store-file blob-store (java.io.ByteArrayInputStream.
-                          (.getBytes s "UTF-8"))))
+(declare crate-store!)
+
+(defn open-root! [{:keys [conn] :as store} uuid create-if-missing]
+  (let [db (d/db conn)
+        entity {:db/doc (str "File root {" uuid "}")
+                :db/id (tempid :db.part/davstore.entries)
+                :davstore.root/id uuid
+                :davstore.entry/name (str \{ uuid \})
+                :davstore.entry/type :davstore.entry.type/container}
+        root (or (d/entity db [:davstore.root/id uuid])
+                 (when-let
+                     [db (and create-if-missing
+                              (:db-after @(transact conn [(assoc entity :davstore.entry/sha1 (calc-sha1 entity))])))]
+                   (d/entity db [:davstore.root/id uuid]))
+                 (throw (ex-info (str "No store {" uuid "}")
+                                 {:conn conn :uuid uuid})))]
+    (assoc store
+      :store-id uuid
+      :root (:db/id root))))
+
+(defn init-store! 
+  ([db-uri blob-store] (init-store! db-uri blob-store (d/squuid) true))
+  ([db-uri blob-store main-root-uuid create-if-missing]
+     (let [created (create-database db-uri)
+           conn (connect db-uri)
+           _ (when created
+               @(transact conn schema))
+           db (d/db conn)
+           res (assoc (open-root! {:conn conn} main-root-uuid create-if-missing)
+                 :path-entry (:db/fn (d/entity db :davstore.fn/path-entry))
+                 :blob-store blob-store)
+           db (if created
+                (:db-after @(transact conn [[:db/add [:davstore.root/id main-root-uuid]
+                                             :db/ident root-id]]))
+                db)]
+       (assoc res :main-root (:db/id (d/entity db [:davstore.root/id main-root-uuid]))))))
 
 ;; dev
 
-(defn insert-testdata [conn blob-store]
-  (let [store-str (partial store-str blob-store)
+(set! *warn-on-reflection* true)
+
+(def test-uri "datomic:mem://davstore-test")
+(defonce test-blobstore (make-store "/tmp/davstore-test"))
+(defonce test-store (init-store! test-uri test-blobstore))
+
+(defn- store-str [{:keys [blob-store]} ^String s]
+  (store-file blob-store (java.io.ByteArrayInputStream.
+                          (.getBytes s "UTF-8"))))
+
+
+(defn insert-testdata [{:keys [conn] :as store}]
+  (let [store-str (partial store-str store)
         db (d/db conn)]
-    (touch! conn db ["a"] "text/plain; charset=utf-8" nil (store-str "a's new content"))
-    (touch! conn db ["b"] "text/plain; charset=utf-8" nil (store-str "b's content"))
-    (mkdir! conn db ["d"])
-    (touch! conn db ["d" "c"] "text/plain; charset=utf-8" nil (store-str "d/c's content"))))
+    (touch! test-store ["a"] "text/plain; charset=utf-8" nil (store-str "a's new content"))
+    (touch! test-store ["b"] "text/plain; charset=utf-8" nil (store-str "b's content"))
+    (mkdir! test-store ["d"])
+    (touch! test-store ["d" "c"] "text/plain; charset=utf-8" nil (store-str "d/c's content"))))
 
 (defmulti print-entry (fn [entry depth] (:davstore.entry/type entry)))
 (defmethod print-entry :davstore.entry.type/container
@@ -179,6 +213,6 @@
    (repeat depth "  ")
    [name " - EH: " sha1 " - CH: " content "\n"]))
 
-(defn pr-tree [db]
-  (doseq [s (print-entry (d/entity db root-id) 0)]
+(defn pr-tree [store]
+  (doseq [s (print-entry (d/entity (store-db store) (:root store)) 0)]
     (print s)))

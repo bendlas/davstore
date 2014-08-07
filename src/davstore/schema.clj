@@ -8,12 +8,14 @@
     :db/ident :db.part/davstore.entries
     :db.install/_partition :db.part/db}
 
+   (field "Identity of a file root. Current value is given by :davstore.entry/sha1"
+          :davstore.root/id :uuid :unique :identity)
    (field "Entry type"
           :davstore.entry/type :ref)
    (field "File name of an entity"
-          :davstore.entry/name :string)
+          :davstore.entry/name :string :index)
    (field "Entry sha-1"
-          :davstore.entry/sha1 :string :unique-identity)
+          :davstore.entry/sha1 :string :unique :identity)
 
    (field "Directory entries"
           :davstore.container/children :ref :many :index)
@@ -106,9 +108,10 @@
 
    (function davstore.fn/rm-entry "Recursively remove entities"
              [db entry]
-             (cons [:db.fn/retractEntity (:db/id entry)]
-                   (map #(vector :davstore.fn/rm-entry %)
-                        (:davstore.container/children entry))))
+             (concat (when (= 1 (count (:davstore.container/_children entry)))
+                       [[:db.fn/retractEntity (:db/id entry)]])
+                     (map #(vector :davstore.fn/rm-entry %)
+                          (:davstore.container/children entry))))
 
    (function davstore.fn/rm-tx "Remove entry"
              {:requires [[datomic.api :as d]]}
