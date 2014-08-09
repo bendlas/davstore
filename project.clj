@@ -10,4 +10,5 @@
                  [webnf/datomic "0.1.0-SNAPSHOT"]
                  [webnf/enlive.clj "0.0.3"]
                  [webnf.deps/contrib "0.0.3"]
-                 [org.clojure/data.xml "9999-bendlas-SNAPSHOT"]])
+                 [org.clojure/data.xml "9999-bendlas-SNAPSHOT"]
+                 [org.clojure/core.typed "0.2.66"]])
