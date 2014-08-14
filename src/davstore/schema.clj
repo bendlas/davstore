@@ -107,7 +107,7 @@
           (map #(vector :davstore.fn/update-child-sha1 (:db/id %) cur nxt)
                (:davstore.container/_children entity)))))
 
-(defn-db davstore.fn/path-entries :- [Db DbId Path -> (Vec Entry)]
+(defn-db davstore.fn/path-entries :- [Db DbId Path -> (Vec Entity)]
   "Resolve path entries from root"
   {:requires [[datomic.api :as d] [clojure.tools.logging :as log]]}
   [db root path]
@@ -125,39 +125,40 @@
           (recur e names (conj res e))))
       res)))
 
-(defn-db davstore.fn/update-child-sha1 :- [Db DbId (Vec Entry) Sha1 (U Sha1 (Coll Sha1)) -> Tx]
+(defn-db davstore.fn/update-child-sha1 :- [Db DbId (Vec Entity) (U Sha1 (Coll Sha1)) -> Tx]
   "Update entry + parent hash for updated child"
   {:requires [[datomic.api :as d]]
    :imports [javax.xml.bind.DatatypeConverter java.security.MessageDigest]
    :db-requires [[child-sha1] [xor-bytes] [sha1-str]]}
-  [db root entry-path from to]
-  (loop [[entry & path] (reverse entry-path)
-         fromb (parse-sha1 from)
-         tob   (if (coll? to)
-                 (reduce #(xor-bytes %1 (parse-sha1 %2)))
-                 (parse-sha1 to))
-         res []]
-    (let []))
-  (let [entity (d/entity db root)
-        fromcb (child-sha1 from)
-        tocb (if (coll? to)
-               (reduce (fn [res sha1]
-                         (xor-bytes res (child-sha1 sha1)))
-                       (child-sha1 (first to)) (next to))
-               (child-sha1 to))
-        updb (xor-bytes fromcb tocb)
+  [db root entry-rpath toggles]
+  (let [[entry & rpath] entry-rpath
+        tob   (if (coll? to)
+                (reduce #(xor-bytes %1 (child-sha1 (parse-sha1 %2)))
+                        (make-array Byte/TYPE 20) to)
+                (child-sha1 (parse-sha1 to)))]
+    [(if rpath
+       [:davstore.fn/update-child-sha1 root rpath [(parse-sha1 esha1) esha1*]]
+       [:db/add root :davstore.root/dir])])
+  #_(let [entity (d/entity db root)
+          fromcb (child-sha1 from)
+          tocb (if (coll? to)
+                 (reduce (fn [res sha1]
+                           (xor-bytes res (child-sha1 sha1)))
+                         (child-sha1 (first to)) (next to))
+                 (child-sha1 to))
+          updb (xor-bytes fromcb tocb)
 
-        cur (:davstore.entry/sha1 entity)
-        _ (assert entity "Entity must exist")
-        _ (assert cur (str "Entity " (pr-str entity) " must have a sha"))
-        curb (DatatypeConverter/parseHexBinary cur)
-        nxt (sha1-str (xor-bytes curb updb))]
-    []
-    (cons [:db/add id :davstore.entry/sha1 nxt]
-          (map #(vector :davstore.fn/update-child-sha1 (:db/id %) cur nxt)
-               (:davstore.container/_children entity)))))
+          cur (:davstore.entry/sha1 entity)
+          _ (assert entity "Entity must exist")
+          _ (assert cur (str "Entity " (pr-str entity) " must have a sha"))
+          curb (DatatypeConverter/parseHexBinary cur)
+          nxt (sha1-str (xor-bytes curb updb))]
+      []
+      (cons [:db/add id :davstore.entry/sha1 nxt]
+            (map #(vector :davstore.fn/update-child-sha1 (:db/id %) cur nxt)
+                 (:davstore.container/_children entity)))))
 
-(defn-db davstore.fn/path-entry :- [Db DbId Path -> Entry]
+(defn-db davstore.fn/path-entry :- [Db DbId Path -> Entity]
   "Get entry at path"
   {:requires [[datomic.api :as d] [clojure.tools.logging :as log]]}
   [db root path]
