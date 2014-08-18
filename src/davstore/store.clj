@@ -172,8 +172,8 @@
     (log/debug "Mkdir success" res)
     {:success :created}))
 
-(ann ^:no-check rm! [Store Path Sha1 Bool -> OpResult])
-(deffileop rm! "DELETE" [{:keys [conn root path-entry] :as store} path current-entry-sha1 recursive]
+(ann rm! [Store Path Sha1 Bool -> OpResult])
+(deffileop ^:no-check rm! "DELETE" [{:keys [conn root path-entry] :as store} path current-entry-sha1 recursive]
   (let [{:keys [davstore.entry/sha1 davstore.container/children] :as have} (path-entry (store-db store) [:davstore.root/id root] path)
         _ (when (not= current-entry-sha1 sha1)
             (throw (ex-info "SHA-1 mismatch"
@@ -189,8 +189,51 @@
     (log/debug "rm success" res)
     {:success :deleted}))
 
-;(ann cp! [Store Path Path String (Option Sha1) Sha1 -> OpResult])
-;(deffileop cp! "COPY" [{:keys [conn db root]} from-path to-path o])
+(ann cp! [Store Path Path Bool -> OpResult])
+(deffileop cp! "COPY" [{:keys [conn path-entry root] :as store}
+                       from-path to-path recursive overwrite]
+  (let [db (store-db store)
+        {:keys [davstore.entry/type] :as have} (path-entry db [:davstore.root/id root] from-path)
+        target (path-entry db [:davstore.root/id root] to-path)
+        _ (when-not have (throw (ex-info "Not found" {:error :not-found :path from-path})))
+        _ (when-not (or recursive (= :davstore.entry.type/file type))
+            (throw (ex-info "Copy source is directory"
+                            {:error :cas/mismatch
+                             :cas/attribute :davstore.entry/type
+                             :cas/expected :davstore.entry.type/file
+                             :cas/current type})))
+        _ (when-not (or overwrite (not target))
+            (throw (ex-info "Copy target exists"
+                            {:error :target-exists :path to-path})))
+        res @(transact conn [[:davstore.fn/cp-tx [:davstore.root/id root]
+                              from-path (:davstore.entry/sha1 have)
+                              to-path (:davstore.entry/sha1 target)
+                              false]])]
+    (log/debug "cp success" res)
+    {:success :copied}))
+
+(ann mv! [Store Path Path Bool -> OpResult])
+(deffileop mv! "MOVE" [{:keys [conn path-entry root] :as store}
+                       from-path to-path recursive overwrite]
+  (let [db (store-db store)
+        {:keys [davstore.entry/type] :as have} (path-entry db [:davstore.root/id root] from-path)
+        target (path-entry db [:davstore.root/id root] to-path)
+        _ (when-not have (throw (ex-info "Not found" {:error :not-found :path from-path})))
+        _ (when-not (or recursive (= :davstore.entry.type/file type))
+            (throw (ex-info "Move source is directory"
+                            {:error :cas/mismatch
+                             :cas/attribute :davstore.entry/type
+                             :cas/expected :davstore.entry.type/file
+                             :cas/current type})))
+        _ (when-not (or overwrite (not target))
+            (throw (ex-info "Move target exists"
+                            {:error :target-exists :path to-path})))
+        res @(transact conn [[:davstore.fn/cp-tx [:davstore.root/id root]
+                              from-path (:davstore.entry/sha1 have)
+                              to-path (:davstore.entry/sha1 target)
+                              true]])]
+    (log/debug "mv success" res)
+    {:success :copied}))
 
 ;; FIXME Port to Idris
 (defn- ^:no-check ls-seq
@@ -232,7 +275,7 @@
                           :davstore.root/id uuid
                           :davstore.root/dir rdir-id)
                         (assoc root-dir
-                          :davstore.entry/sha1 (davstore.schema/entry-sha1 root-dir))]
+                          :davstore.entry/sha1 (davstore.schema/entry-sha1 root-dir nil))]
                     {:keys [db-after]} @(transact conn tx)]
                 (d/entity db-after [:davstore.root/id uuid]))
               :else (throw (ex-info (str "No store {" uuid "}")
@@ -272,12 +315,12 @@
                        davstore.entry/sha1] :as entry}]
    (let [subresults (map #(cons name %)
                          (mapcat verify children))
-         actual-sha1 (davstore.schema/entry-sha1 entry)]
+         actual-sha1 (davstore.schema/entry-sha1 entry nil)]
      (cond-> subresults (not= sha1 actual-sha1)
-             (conj [{:error :sha1-mismatch
-                     :entry entry
-                     :stored-sha1 sha1
-                     :actual-sha1 actual-sha1}]))))
+             (conj [name {:error :sha1-mismatch
+                          :entry entry
+                          :stored-sha1 sha1
+                          :actual-sha1 actual-sha1}]))))
  (defn verify-store [store]
    (verify (get-entry store [])))
 
@@ -293,16 +336,17 @@
    (store-file blob-store (java.io.ByteArrayInputStream.
                            (.getBytes s "UTF-8"))))
 
+ (defn store-tp [store path content]
+   (touch! store path "text/plain; charset=utf-8" nil (store-str store content)))
+
  (defn write! [store path content]
    (touch! store path "text/plain" nil (store-str store content)))
 
  (defn insert-testdata [{:keys [conn] :as store}]
-   (let [store-str (partial store-str store)
-         db (d/db conn)]
-     (touch! store ["a"] "text/plain; charset=utf-8" nil (store-str "a's new content"))
-     (touch! store ["b"] "text/plain; charset=utf-8" nil (store-str "b's content"))
-     (mkdir! store ["d"])
-     (touch! store ["d" "c"] "text/plain; charset=utf-8" nil (store-str "d/c's content"))))
+   (store-tp store ["a"] "a's new content")
+   (store-tp store ["b"] "b's content")
+   (mkdir! store ["d"])
+   (store-tp store ["d" "c"] "d/c's content"))
 
  (declare test-store)
 
@@ -316,18 +360,18 @@
 
  (defmulti print-entry (fn [entry depth] (:davstore.entry/type entry)))
  (defmethod print-entry :davstore.entry.type/container
-   [{:keys [davstore.entry/name davstore.entry/sha1 davstore.container/children]} depth]
+   [{:keys [db/id davstore.entry/name davstore.entry/sha1 davstore.container/children]} depth]
    (apply concat
           (repeat depth "  ")
-          [name "/" " - EH: " sha1 "\n"]
+          [name "/ #" id " - EH: " sha1 "\n"]
           (map #(print-entry % (inc depth)) children)))
 
  (defmethod print-entry :davstore.entry.type/file
-   [{:keys [davstore.entry/name davstore.entry/sha1]
+   [{:keys [db/id davstore.entry/name davstore.entry/sha1]
      content :davstore.file.content/sha1} depth]
    (concat
     (repeat depth "  ")
-    [name " - EH: " sha1 " - CH: " content "\n"]))
+    [name " #" id " - EH: " sha1 " - CH: " content "\n"]))
 
  (defn pr-tree [store]
    (doseq [s (print-entry (get-entry store []) 0)]
