@@ -274,12 +274,13 @@
                   (assoc-in (interpose :updates to-dir-entries) (cond-> {:additions #{to-sha1}}
                                                                         match-to-sha1 (assoc :removals #{match-to-sha1})))
                   (cond-> move (update-in (concat (interpose :updates from-dir-entries) [:removals])
-                                          conj match-from-sha1)))]]
+                                          (fnil conj #{}) match-from-sha1)))]]
             (if move
-              [[:db/add (:db/id source) :davstore.entry/name tname]
-               [:db/add (:db/id source) :davstore.entry/sha1 to-sha1]
-               [:db/add (:db/id to-dir) :davstore.container/children (:db/id source)]
-               [:db/retract (:db/id from-dir) :davstore.container/children (:db/id source)]]
+              (concat [[:db/add (:db/id source) :davstore.entry/name tname]
+                       [:db/add (:db/id source) :davstore.entry/sha1 to-sha1]
+                       [:db/add (:db/id to-dir) :davstore.container/children (:db/id source)]]
+                      (when-not (= to-dir from-dir)
+                        [[:db/retract (:db/id from-dir) :davstore.container/children (:db/id source)]]))
               ((fn tf [pid entry]
                  (let [tid (d/tempid :db.part/davstore.entries)]
                    (list* (dissoc (into {:db/id tid} entry) :davstore.container/children)

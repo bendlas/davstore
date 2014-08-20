@@ -228,12 +228,15 @@
         _ (when-not (or overwrite (not target))
             (throw (ex-info "Move target exists"
                             {:error :target-exists :path to-path})))
+        _ (when (= from-path (take (count from-path) to-path))
+            (throw (ex-info "Cannot move entry into itself"
+                            {:error :target-removed :path to-path})))
         res @(transact conn [[:davstore.fn/cp-tx [:davstore.root/id root]
                               from-path (:davstore.entry/sha1 have)
                               to-path (:davstore.entry/sha1 target)
                               true]])]
     (log/debug "mv success" res)
-    {:success :copied}))
+    {:success :moved}))
 
 ;; FIXME Port to Idris
 (defn- ^:no-check ls-seq
@@ -343,7 +346,7 @@
    (touch! store path "text/plain" nil (store-str store content)))
 
  (defn insert-testdata [{:keys [conn] :as store}]
-   (store-tp store ["a"] "a's new content")
+   (store-tp store ["a"] "a's content")
    (store-tp store ["b"] "b's content")
    (mkdir! store ["d"])
    (store-tp store ["d" "c"] "d/c's content"))
