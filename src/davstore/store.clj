@@ -5,7 +5,7 @@
            (java.security MessageDigest)
            java.util.UUID)
   (:require [davstore.schema :refer [schema]]
-            [davstore.blob :refer [make-store store-file get-file BlobStore]]
+            [davstore.blob :as blob :refer [make-store store-file get-file BlobStore]]
             [clojure.tools.logging :as log]
             [webnf.datomic.query :refer [reify-entity]]
             [clojure.repl :refer :all]
@@ -114,6 +114,12 @@
 
 ;; ## File Store
 
+(ann open-db [Store -> Store])
+(defn open-db [{:keys [db conn] :as store}]
+  (when db
+    (log/warn "Store already opened, reopening with new db"))
+  (assoc store :db (d/db conn)))
+
 (ann store-db [Store -> datomic.db.Db])
 (defn store-db [{:keys [db conn]}]
   (if db
@@ -142,6 +148,9 @@
 (deffileop touch! "PUT" [{:keys [conn root path-entry] :as store} path mime-type current-entry-sha1 blob-sha1]
   (let [db (store-db store)
         {:keys [davstore.entry/sha1 davstore.entry/type] :as have} (path-entry db [:davstore.root/id root] path)
+        current-entry-sha1 (if (= :current current-entry-sha1)
+                             sha1
+                             current-entry-sha1)
         _ (when (not= current-entry-sha1 sha1)
             (throw (ex-info "SHA-1 mismatch"
                             {:error :cas/mismatch
@@ -165,7 +174,7 @@
       {:success :created})))
 
 (ann mkdir! [Store Path -> OpResult])
-(deffileop mkdir! "MKCOLL" [{:keys [conn root]} path]
+(deffileop mkdir! "MKCOL" [{:keys [conn root]} path]
   (let [res @(transact conn [[:davstore.fn/cu-tx [:davstore.root/id root] path nil
                               {:davstore.entry/name (last path)
                                :davstore.entry/type :davstore.entry.type/container}]])]
@@ -175,13 +184,14 @@
 (ann rm! [Store Path Sha1 Bool -> OpResult])
 (deffileop ^:no-check rm! "DELETE" [{:keys [conn root path-entry] :as store} path current-entry-sha1 recursive]
   (let [{:keys [davstore.entry/sha1 davstore.container/children] :as have} (path-entry (store-db store) [:davstore.root/id root] path)
+        current-entry-sha1 (if (= :current current-entry-sha1) sha1 current-entry-sha1)
         _ (when (not= current-entry-sha1 sha1)
             (throw (ex-info "SHA-1 mismatch"
                             {:error :cas/mismatch
                              :cas/attribute :davstore.entry/sha1
                              :cas/expected current-entry-sha1
                              :cas/current sha1})))
-        _ (when-not (and (not recursive) (seq children))
+        _ (when (and (not recursive) (seq children))
             (throw (ex-info "Directory not empty"
                             {:error :dir-not-empty
                              :path path})))
@@ -236,19 +246,29 @@
                               to-path (:davstore.entry/sha1 target)
                               true]])]
     (log/debug "mv success" res)
-    {:success :moved}))
+    (if target
+      {:success :moved
+       :result :overwritten}
+      {:success :moved
+       :result :created})))
+
+(ann blob-file [Store Entry -> java.io.File])
+(defn blob-file [{bs :blob-store} {sha1 :davstore.file.content/sha1}]
+  (get-file bs sha1))
 
 ;; FIXME Port to Idris
 (defn- ^:no-check ls-seq
-  [{:keys [davstore.container/children] :as e} dir depth]
-  (cons (assoc (reify-entity e) :davstore.ls/path dir)
+  [store {:keys [davstore.container/children davstore.entry/type] :as e} dir depth]
+  (cons (cond-> (assoc (reify-entity e)
+                  :davstore.ls/path dir)
+                (= :davstore.entry.type/file type) (assoc :davstore.ls/blob-file (blob-file store e)))
         (when (pos? depth)
-          (mapcat #(ls-seq % (conj dir (:davstore.entry/name %)) (dec depth)) children))))
+          (mapcat #(ls-seq store % (conj dir (:davstore.entry/name %)) (dec depth)) children))))
 
 (ann ls [Store Path Long -> (List Entry)])
 (defn ^:no-check ls [store path depth]
   (when-let [e (get-entry store path)]
-    (ls-seq e [] depth)))
+    (ls-seq store e (vec path) depth)))
 
 ;; ### File Store Init
 
@@ -333,7 +353,7 @@
 
  (defn cat [store path]
    (when-let [sha1 (:davstore.file.content/sha1 (get-entry store path))]
-     (println (slurp (get-file (:blob-store store) sha1)))))
+     (println (slurp (blob-file store sha1)))))
 
  (defn- store-str [{:keys [blob-store]} ^String s]
    (store-file blob-store (java.io.ByteArrayInputStream.

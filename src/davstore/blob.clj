@@ -1,6 +1,6 @@
 (ns davstore.blob
   (:import java.io.File
-           (java.security MessageDigest DigestInputStream)
+           (java.security MessageDigest DigestInputStream DigestOutputStream)
            javax.xml.bind.DatatypeConverter)
   (:require 
    [clojure.edn :as edn]
@@ -42,6 +42,8 @@
                     :tempfile File}
         :complete? true))
 
+(defalias Sha1 String)
+
 (ann make-store [(U String File) -> BlobStore])
 (defn make-store [root-path]
   (let [rf (.getAbsoluteFile (file root-path))]
@@ -60,18 +62,18 @@
                              (.digest digest)))
        :tempfile tf})))
 
-(ann sha-file [BlobStore String -> File])
+(ann sha-file [BlobStore Sha1 -> File])
 (defn- sha-file ^File [{:keys [root-dir]} ^String sha-1]
   (let [sha (.toLowerCase sha-1)
         dir (file root-dir (subs sha 0 2))]
     (file dir (subs sha 2))))
 
-(ann get-file [BlobStore String -> (Option File)])
+(ann get-file [BlobStore Sha1 -> (Option File)])
 (defn get-file [store sha-1]
   (let [f (sha-file store sha-1)]
     (when (.isFile f) f)))
 
-(ann open-file [BlobStore String -> (Option java.io.InputStream)])
+(ann open-file [BlobStore Sha1 -> (Option java.io.InputStream)])
 (defn open-file [store sha-1]
   (when-let [f (get-file store sha-1)]
     (input-stream f)))
@@ -88,8 +90,30 @@
         (.renameTo tempfile dest)
         true))))
 
-(ann store-file [BlobStore java.io.InputStream -> String])
+(ann store-file [BlobStore java.io.InputStream -> Sha1])
 (defn store-file [store input-stream]
   (let [{:keys [sha-1] :as res} (store-temp store input-stream)]
     (merge-temp store res)
     sha-1))
+
+(ann stream-temp [BlobStore [java.io.OutputStream -> nil] -> TempFile])
+(defn stream-temp [{:keys [root-dir]} f]
+  (let [tf (File/createTempFile "temp-" ".part" root-dir)
+        digest (MessageDigest/getInstance "SHA-1")]
+    (with-open [os (DigestOutputStream. (output-stream tf) digest)]
+      (f os)
+      {:sha-1 (.toLowerCase (DatatypeConverter/printHexBinary
+                             (.digest digest)))
+       :tempfile tf})))
+
+(ann stream-file [BlobStore [java.io.OutputStream -> nil] -> Sha1])
+(defn stream-file [store f]
+  (let [{:keys [sha-1] :as res} (stream-temp store f)]
+    (merge-temp store res)
+    sha-1))
+
+(ann write-file [BlobStore [java.io.PrintWriter -> nil] -> Sha1])
+(defn write-file [store f]
+  (stream-file store #(with-open [w (java.io.PrintWriter.
+                                     (java.io.OutputStreamWriter. %))]
+                        (f w))))

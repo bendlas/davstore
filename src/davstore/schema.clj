@@ -222,8 +222,8 @@
   (if-let [entries (path-entries db root path)]
     (let [{:keys [davstore.entry/sha1 db/id] :as entry} (last entries)]
       (if (= sha1 match-sha1)
-        [[:davstore.fn/update-parent-hashes root (update-in {} (interpose :updates entries) assoc
-                                                            :removals #{sha1})]
+        [[:davstore.fn/update-parent-hashes root (update-in {} (interpose :updates (butlast entries))
+                                                            assoc :removals #{sha1})]
          [:db.fn/retractEntity id]]
         (throw (ex-info "SHA-1 mismatch"
                         {:error :cas/mismatch

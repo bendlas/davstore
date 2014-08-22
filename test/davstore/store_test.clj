@@ -122,6 +122,15 @@
       (mv! *store* ["d"] ["D"] true true)
       (update-root! #(dissoc % "d")))))
 
+(deftest delete
+  (binding [*trt* testdata-ref-tree]
+    (rm! *store* ["a"] :current false)
+    (update-root! #(dissoc % "a"))
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (rm! *store* ["d"] :current false)))
+    (rm! *store* ["d"] :current true)
+    (update-root! #(dissoc % "d"))))
+
 (deftest self-referential
   (binding [*trt* testdata-ref-tree]
     (testing "Copy into itself"
