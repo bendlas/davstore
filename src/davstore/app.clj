@@ -70,17 +70,38 @@
 (defn wrap-log [h]
   (fn [req]
     (let [bos (java.io.ByteArrayOutputStream.)
-          _ (io/copy (:body req) bos)
+          _ (when-let [body (:body req)] (io/copy body bos))
           bs (.toByteArray bos)
+          _ (log/debug (:request-method req) (:uri req)
+                       "\nHEADERS:" (with-out-str (pprint (:headers req)))
+                       "BODY:" (str \' (String. bs "UTF-8") \'))
           resp (h (assoc req :body (java.io.ByteArrayInputStream. bs)))]
-      (log/debug "REQUEST" 
-                 (with-out-str (pprint (select-keys req [:request-method :uri :headers])))
-                 (String. bs "UTF-8") "\n  =>" (with-out-str (pprint resp)))
+      (log/debug " => RESPONSE" (with-out-str (pprint resp)))
       resp)))
 
 (def davstore
   (app
    (wrap-store blob-dir db-uri root-id "/files")
-   ;wrap-log
+   ;; wrap-log
    ["blob" &] blob-handler
-   ["files" &] file-handler))
+   ["files" &] file-handler
+   ["debug"] (fn [req] {:status 400 :debug req})))
+
+(defonce server (agent nil))
+
+(require '[ring.adapter.jetty :as rj])
+(defn start-server! []
+  (send server
+        (fn [s]
+          (assert (not s))
+          (rj/run-jetty #'davstore {:port 8082 :join? false}))))
+
+(defn stop-server! []
+  (send server
+        (fn [s]
+          (.stop s)
+          nil)))
+
+(defn get-handler-store
+  ([] (get-handler-store davstore))
+  ([h] (::store (:debug (h {:uri "/debug"})))))
