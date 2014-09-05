@@ -219,9 +219,9 @@
                  (recur entries'
                         id ::dd/children
                         (into tx (cas-entry parent ch-attr id name type)))
-                 (log/spy (into tx (if-let [{:keys [db/id de/type de/name]} entry]
-                                     (cas-entry parent ch-attr id name type)
-                                     [[::dfn/assert-available parent file-name]])))))
+                 (into tx (if-let [{:keys [db/id de/type de/name]} entry]
+                            (cas-entry parent ch-attr id name type)
+                            [[::dfn/assert-available parent file-name]]))))
      :current-entry entry}))
 
 (defn match-entry! [{:keys [dfc/sha-1 de/type db/id] :as current-entry}
@@ -384,12 +384,12 @@
 
 ;; FIXME Port to Idris
 (defn- ^:no-check ls-seq
-  [store {:keys [dd/children de/type] :as e} dir depth]
+  [store {:keys [::dd/children ::de/type] :as e} dir depth]
   (cons (cond-> (assoc (reify-entity e)
                   :davstore.ls/path dir)
                 (= ::det/file type) (assoc :davstore.ls/blob-file (blob-file store e)))
         (when (pos? depth)
-          (mapcat #(ls-seq store % (conj dir (:de/name %)) (dec depth)) children))))
+          (mapcat #(ls-seq store % (conj dir (::de/name %)) (dec depth)) children))))
 
 (ann ls [Store Path Long -> (List Entry)])
 (defn ^:no-check ls [store path depth]
