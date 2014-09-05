@@ -96,7 +96,7 @@
 
 (defhandler propfind [path {:as req
                             store :davstore.app/store
-                            {depth "depth"} :headers
+                            {:strs [depth content-length]} :headers
                             uri :uri}]
   (log/info "PROPFIND" uri (pr-str path) "depth" depth)
   (if-let [fs (seq (store/ls store (remove blank? path) 
@@ -104,8 +104,10 @@
                                "0" 0
                                "1" 1
                                "infinity" 65536)))]
-    (let [want-props (dav/parse-propfind (xml/parse (:body req)))]
-      {:status 207 :headers {"content-type" "text/xml; charset=utf-8"}
+    (let [want-props (if (= "0" content-length)
+                       {::dav/all true}
+                       (dav/parse-propfind (xml/parse (:body req))))]
+      {:status 207 :headers {"content-type" "text/xml; charset=utf-8" "dav" "1"}
        :body (dav/emit (dav/multistatus
                         (propfind-status (:root-dir store) fs want-props)))})
     {:status 404}))

@@ -6,7 +6,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.7.0-alpha1"]
-                 [webnf/base "0.0.12"]
+                 [webnf/base "0.0.12-SNAPSHOT"]
                  [webnf/handler "0.0.11"]
                  [webnf/datomic "0.1.0-SNAPSHOT"]
                  [webnf/enlive.clj "0.0.3"]
@@ -14,6 +14,7 @@
                  [org.clojure/data.xml "9999-bendlas-SNAPSHOT"]
                  [org.clojure/core.typed "0.2.66"]
                  [de.kotka/lazymap "3.1.1"]
+                 [ring/ring-jetty-adapter "1.3.0"]
                  [cider/cider-nrepl "0.8.0-SNAPSHOT"]]
   :plugins [[lein-ring "0.8.11"]]
   :ring {:handler davstore.app/davstore

@@ -24,7 +24,7 @@
   (with-open [w (java.io.StringWriter. 1024)]
     (xml/emit
      (-> xt
-         (assoc-in [:attrs :xmlns] "DAV:")
+         (assoc-in [:attrs :xmlns/d] "DAV:")
          (assoc-in [:attrs :xmlns/b] "//dav.bendlas.net/extension-elements"))
      w)
     (.toString w)))
