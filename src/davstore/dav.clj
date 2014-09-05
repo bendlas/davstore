@@ -21,13 +21,13 @@
 
 (defn entry-status [{:as want-props :keys [::dav/all ::dav/names-only]}
                     {:as entry :keys [:davstore.ls/path :davstore.file.content/mime-type :davstore.entry/type
-                                      :davstore.entry/sha1 :davstore.entry/name :davstore.ls/blob-file]}]
+                                      :davstore.file.content/sha-1 :davstore.entry/name :davstore.ls/blob-file]}]
   (let [props (assoc-when* (fn* ([k] (or all (contains? want-props k)))
                                 ([k v] (not (nil? v))))
                            {}
                            #xml/name ::dav/displayname name
                            #xml/name ::dav/getcontenttype mime-type
-                           #xml/name ::dav/getetag (str \" sha1 \")
+                           #xml/name ::dav/getetag (when sha-1 (str \" sha-1 \"))
                            #xml/name ::dav/resourcetype
                            (case type
                              :davstore.entry.type/container (xml/element ::dav/collection)
@@ -113,12 +113,12 @@
 (defhandler read [path {:as req store :davstore.app/store uri :uri}]
   (log/info "GET" uri (pr-str path))
   (if-let [{:as entry
-            :keys [:davstore.file.content/mime-type :davstore.entry/type :davstore.entry/sha1]}
+            :keys [:davstore.file.content/mime-type :davstore.entry/type :davstore.file.content/sha-1]}
            (store/get-entry store (remove blank? path))]
     (if (= :davstore.entry.type/file type)
       {:status 200
        :headers {"Content-Type" mime-type
-                 "ETag" (str \" sha1 \")}
+                 "ETag" (str \" sha-1 \")}
        :body (store/blob-file store entry)}
       {:status 405})
     {:status 400}))
@@ -196,8 +196,8 @@
                 content-type)]
     (store/touch! store path
                   ctype
-                  (or (parse-etag if-match) :current)
-                  blob-sha)))
+                  blob-sha
+                  (or (parse-etag if-match) :current))))
 
 (defn wrap-errors [h]
   (fn [req]
