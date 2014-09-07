@@ -219,12 +219,12 @@
                  (recur entries'
                         id ::dd/children
                         (into tx (cas-entry parent ch-attr id name type)))
-                 (into tx (if-let [{:keys [db/id de/type de/name]} entry]
+                 (into tx (if-let [{:keys [db/id ::de/type ::de/name]} entry]
                             (cas-entry parent ch-attr id name type)
                             [[::dfn/assert-available parent file-name]]))))
      :current-entry entry}))
 
-(defn match-entry! [{:keys [dfc/sha-1 de/type db/id] :as current-entry}
+(defn match-entry! [{:keys [::dfc/sha-1 ::de/type db/id] :as current-entry}
                     match-sha-1 match-type]
   (when-not (or (= :current match-sha-1)
                 (= match-sha-1 sha-1))
@@ -233,7 +233,8 @@
                      :cas/attribute ::de/sha-1
                      :cas/expected match-sha-1
                      :cas/current sha-1})))
-  (when (and current-entry
+  (when (and (not= :current match-type)
+             current-entry
              (not= match-type type))
     (throw (ex-info "Target type mismatch"
                     {:error :cas/mismatch
@@ -255,7 +256,11 @@
         tx (concat cas-tx
                    [[:db/add id* ::dfc/mime-type mime-type]]
                    (if current-entry
-                     [[:db.fn/cas id* ::dfc/sha-1 match-sha-1 sha-1*]]
+                     [[:db.fn/cas id* ::dfc/sha-1
+                       (if (= :current match-sha-1)
+                         (::dfc/sha-1 current-entry)
+                         match-sha-1)
+                       sha-1*]]
                      [{:db/id id*
                        ::dd/_children parent-id
                        ::de/type ::det/file
@@ -403,29 +408,35 @@
 
 ;(declare crate-store! Store)
 
+(defn create-root!
+  ([conn uuid] (create-root! conn uuid {}))
+  ([conn uuid root-entity]
+     (assert (not (d/entity (d/db conn) [:davstore.root/id uuid])) "Root exists")
+     (let [root-id (tempid :db.part/user)
+           rdir-id (tempid :db.part/davstore.entries)
+           root-dir {:db/id rdir-id
+                     :davstore.entry/name (str \{ uuid \})
+                     :davstore.entry/type :davstore.entry.type/dir}
+           tx [(assoc root-entity
+                 :db/doc (str "File root {" uuid "}")
+                 :db/id root-id
+                 :davstore.root/id uuid
+                 :davstore.root/dir rdir-id)
+               root-dir]
+           {:keys [db-after]} @(transact conn tx)]
+       (d/entity db-after [:davstore.root/id uuid]))))
+
 (ann open-root! (IFn [(HMap :mandatory {:conn datomic.Connection})
                       UUID (Option (HMap))
                       -> (HMap :mandatory {:conn datomic.Connection :root UUID})]
                      [Store UUID (Option (HMap)) -> Store]))
+
 (defn open-root! [{:keys [conn] :as store} uuid create-if-missing]
   (let [db (d/db conn)
         root' (d/entity db [:davstore.root/id uuid])
         root (cond
               root' root'
-              create-if-missing
-              (let [root-id (tempid :db.part/user)
-                    rdir-id (tempid :db.part/davstore.entries)
-                    root-dir {:db/id rdir-id
-                              :davstore.entry/name (str \{ uuid \})
-                              :davstore.entry/type :davstore.entry.type/dir}
-                    tx [(assoc create-if-missing
-                          :db/doc (str "File root {" uuid "}")
-                          :db/id root-id
-                          :davstore.root/id uuid
-                          :davstore.root/dir rdir-id)
-                        root-dir]
-                    {:keys [db-after]} @(transact conn tx)]
-                (d/entity db-after [:davstore.root/id uuid]))
+              create-if-missing (create-root! conn uuid create-if-missing)
               :else (throw (ex-info (str "No store {" uuid "}")
                                     {:conn conn :uuid uuid})))]
     (assoc store :root uuid)))

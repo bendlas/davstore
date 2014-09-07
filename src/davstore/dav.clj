@@ -1,16 +1,18 @@
 (ns davstore.dav
-  (:require [clojure.data.xml :as xml]
-            [clojure.core.match :refer [match]]
+  (:require [clojure.core.match :refer [match]]
+            [clojure.data.xml :as xml]
+            [clojure.string :as str]
+            [clojure.string :refer [blank? split]]
             [clojure.tools.logging :as log]
-            [davstore.store :as store]
             [davstore.blob :as blob]
             [davstore.dav.xml :as dav]
+            [davstore.store :as store]
             [lazymap.core :refer [lazy-hash-map]]
-            [webnf.kv :refer [map-vals assoc-when*]]
-            [clojure.string :refer [blank? split]]
-            [ring.util.response :refer [created]])
-  (:import java.net.URI
-           java.io.File
+            [ring.util.response :refer [created]]
+            [webnf.base :refer [pprint-str]]
+            [webnf.kv :refer [map-vals assoc-when*]])
+  (:import java.io.File
+           java.net.URI
            java.nio.file.Files))
 
 (defmacro defhandler [name [route-info-sym request-sym :as args] & body]
@@ -85,8 +87,14 @@
   (when-let [[_ res] (and etag (re-matches #"\"([^\"]+)\"" etag))]
     res))
 
+(def mime-overrides
+  {"css" "text/css"
+   "js" "text/javascript"})
+
 (defn infer-type [^File file name]
-  (Files/probeContentType (.toPath file)))
+  (let [ext (last (str/split name #"\."))]
+    (or (mime-overrides ext)
+        (Files/probeContentType (.toPath file)))))
 
 ;; Handlers
 
@@ -122,8 +130,8 @@
        :headers {"Content-Type" mime-type
                  "ETag" (str \" sha-1 \")}
        :body (store/blob-file store entry)}
-      {:status 405})
-    {:status 400}))
+      {:status 405 :body (str uri " is a directory")})
+    {:status 404 :body (str "File " uri " not found")}))
 
 (defhandler mkcol [path {:as req uri :uri store :davstore.app/store}]
   ;; FIXME normalize path for all
@@ -208,9 +216,10 @@
            (catch java.util.concurrent.ExecutionException e
              (throw (.getCause e))))
       (catch clojure.lang.ExceptionInfo e
+        (log/debug e "Translating to status code" (pprint-str (ex-data e)))
         (match [(ex-data e)]
-               [{:error :cas/mismatch}] {:status 412}
-               [{:error :dir-not-empty}] {:status 412}
+               [{:error :cas/mismatch}] {:status 412 :body "Precondition failed"}
+               [{:error :dir-not-empty}] {:status 412 :body "Directory not empty"}
                [data] (do (log/error e "Unhandled Exception during" (:request-method req) (:uri req)
                                      "\nException Info:" (pr-str data))
                           {:status 500}))))))
