@@ -169,7 +169,7 @@
          {:status 204}
          [{:success :moved
            :result :created}]
-         {:status 201}))
+         (created destination)))
 
 (defhandler copy [path {:as req store :davstore.app/store
                         {:strs [depth overwrite destination]} :headers
@@ -185,12 +185,12 @@
                        "T" true
                        "F" false
                        nil false))]
-         [{:success :moved
+         [{:success :copied
            :result :overwritten}]
          {:status 204}
-         [{:success :moved
-           :result :overwritten}]
-         {:status 201}))
+         [{:success :copied
+           :result :created}]
+         (created destination)))
 
 (defhandler put [path {:as req store :davstore.app/store
                        body :body
