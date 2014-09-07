@@ -7,7 +7,6 @@
             [davstore.blob :as blob]
             [davstore.dav.xml :as dav]
             [davstore.store :as store]
-            [lazymap.core :refer [lazy-hash-map]]
             [ring.util.response :refer [created]]
             [webnf.base :refer [pprint-str]]
             [webnf.kv :refer [map-vals assoc-when*]])
