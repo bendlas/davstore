@@ -31,6 +31,8 @@
 ;; Handlers
 
 (def blob-handler
+  "Unused for WebDAV, but useful if you want to serve stable, infinitely
+  cacheable names, say for a CDN."
   (app
    [] {:post (fn [{body :body store ::bstore :as req}]
                (let [{:keys [tempfile sha-1] :as res} (blob/store-temp store body)
@@ -64,8 +66,8 @@
                            )}))
 
 (def blob-dir "/tmp/davstore-app")
-(def db-uri "datomic:mem://davstore-app" #_"datomic:free://localhost:4334/davstore-app")
-(def root-id #uuid "6c28aedd-6ada-44b4-9f2d-1c666926982f")
+(def db-uri "datomic:mem://davstore-app")
+(def root-id #uuid "7178245f-5e6c-30fb-8175-c265b9fe6cb8")
 
 (defn wrap-log [h]
   (fn [req]
@@ -79,18 +81,20 @@
       (log/debug " => RESPONSE" (with-out-str (pprint resp)))
       resp)))
 
-(def davstore
-  (app
-   (wrap-store blob-dir db-uri root-id "/files")
-   ;; wrap-log
-   ["blob" &] blob-handler
-   ["files" &] file-handler
-   ["debug"] (fn [req] {:status 400 :debug req})))
-
-(defonce server (agent nil))
+;; Quick and embedded dav server
 
 (require '[ring.adapter.jetty :as rj])
+(declare davstore)
+(defonce server (agent nil))
+
 (defn start-server! []
+  (def davstore
+    (app
+     (wrap-store blob-dir db-uri root-id "/files")
+     ;; wrap-log
+     ["blob" &] blob-handler
+     ["files" &] file-handler
+     ["debug"] (fn [req] {:status 400 :debug req})))
   (send server
         (fn [s]
           (assert (not s))
