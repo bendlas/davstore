@@ -15,6 +15,12 @@ To quickly start a server from a checkout
 	cd davstore
     lein ring server-headless 8080
 
+Then mount the webdav share with a client of choice:
+- `mount -t davfs http://localhost:8080/files /mnt/dav`
+- enter `dav://localhost:8080/files` into gnome's file manager
+- OSX is untested yet
+- Windows net mounts work, but only for reading
+
 This creates an in-memory datomic database for the file system and
 stores the file blobs in `/tmp/davstore-app`.
 The default webdav root is `#uuid "7178245f-5e6c-30fb-8175-c265b9fe6cb8"`
@@ -50,6 +56,9 @@ The file header is also omitted, in order to be able to respond with a plain `ja
 
 ### ... use datomic?
 Because didn't you always want an undo slider on your web resources / network share? It just fits perfectly with content addressed file blobs.
+
+### ... not support windows?
+Windows requires level 2 DAV (mainly locks), which are not implemented yet.
 
 ## FAQ
 
