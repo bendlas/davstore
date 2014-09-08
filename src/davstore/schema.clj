@@ -105,7 +105,7 @@
 
 
 (def schema-ident :davstore/schema)
-(def schema-version "1.0")
+(def schema-version "1.1")
 
 (ann schema Tx)
 (def ^:no-check schema
@@ -136,6 +136,8 @@
 
        (field "Directory entries"
               :davstore.dir/children :ref :many :component)
+       (field "Index file of directory"
+              :davstore.dir/index-file :string)
 
        (field "File content sha-1"
               :davstore.file.content/sha-1 :string :index)

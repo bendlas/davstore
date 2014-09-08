@@ -7,18 +7,14 @@
             [davstore.blob :as blob]
             [davstore.dav.xml :as dav]
             [davstore.store :as store]
+            [davstore.schema :refer [alias-ns]]
+            [datomic.api :as d]
             [ring.util.response :refer [created]]
             [webnf.base :refer [pprint-str]]
             [webnf.kv :refer [map-vals assoc-when*]])
   (:import java.io.File
            java.net.URI
            java.nio.file.Files))
-
-(defmacro defhandler [name [route-info-sym request-sym :as args] & body]
-  (assert (= 2 (count args)) "Handler must take route-info and request")
-  `(defn ~name [~route-info-sym]
-     (fn [~request-sym]
-       ~@body)))
 
 (defn entry-status [{:as want-props :keys [::dav/all ::dav/names-only]}
                     {:as entry :keys [:davstore.ls/path :davstore.file.content/mime-type :davstore.entry/type
@@ -100,7 +96,22 @@
     (or (mime-overrides ext)
         (Files/probeContentType (.toPath file)))))
 
+(defmacro defhandler [name [route-info-sym request-sym :as args] & body]
+  (assert (= 2 (count args)) "Handler must take route-info and request")
+  `(defn ~name [~route-info-sym]
+     (fn [~request-sym]
+       ~@body)))
+
 ;; Handlers
+
+(alias-ns
+ de  davstore.entry
+ det davstore.entry.type
+ des davstore.entry.snapshot
+ dr  davstore.root
+ dd  davstore.dir
+ dfc davstore.file.content
+ dfn davstore.fn)
 
 (defhandler options [_ _]
   {:status 200
@@ -126,16 +137,20 @@
 
 (defhandler read [path {:as req store :davstore.app/store uri :uri}]
   (log/info "GET" uri (pr-str path))
-  (if-let [{:as entry
-            :keys [:davstore.file.content/mime-type :davstore.entry/type :davstore.file.content/sha-1]}
+  (let [db (store/store-db store)]
+    (loop [{:as entry
+            :keys [::dfc/mime-type ::de/type ::dfc/sha-1 ::dd/index-file db/id]}
            (store/get-entry store (remove blank? path))]
-    (if (= :davstore.entry.type/file type)
-      {:status 200
-       :headers {"Content-Type" mime-type
-                 "ETag" (str \" sha-1 \")}
-       :body (store/blob-file store entry)}
-      {:status 405 :body (str uri " is a directory")})
-    {:status 404 :body (str "File " uri " not found")}))
+      (if entry
+        (if (= ::det/file type)
+          {:status 200
+           :headers {"Content-Type" mime-type
+                     "ETag" (str \" sha-1 \")}
+           :body (store/blob-file store entry)}
+          (if index-file
+            (recur (d/entity db (store/dir-child db id index-file)))
+            {:status 405 :body (str uri " is a directory")}))
+        {:status 404 :body (str "File " uri " not found")}))))
 
 (defhandler mkcol [path {:as req uri :uri store :davstore.app/store}]
   ;; FIXME normalize path for all

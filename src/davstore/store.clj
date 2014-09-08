@@ -145,6 +145,14 @@
                 (ff e''))))]
     (pw e)))
 
+(defn dir-child [db dir-id child-name]
+  (when-let [name-entries (seq (d/q '[:find ?id :in $ ?root ?name :where
+                                      [?root :davstore.dir/children ?id]
+                                      [?id :davstore.entry/name ?name]]
+                                    db dir-id child-name))]
+    (assert (= 1 (count name-entries)))
+    (log/spy (ffirst name-entries))))
+
 (ann path-entries [Db DbId Path -> (Option (Vec Entity))])
 (defn path-entries
   "Resolve path entries from root"
@@ -154,13 +162,9 @@
          res [entry]]
     (assert entry)
     (if fname
-      (if-let [name-entries (seq (d/q '[:find ?id :in $ ?root ?name :where
-                                        [?root :davstore.dir/children ?id]
-                                        [?id :davstore.entry/name ?name]]
-                                      db id fname))]
-        (do (assert (= 1 (count name-entries)))
-            (let [e (d/entity db (ffirst name-entries))]
-              (recur e names (conj res e))))
+      (if-let [ch (dir-child db id fname)]
+        (let [e (d/entity db ch)]
+          (recur e names (conj res e)))
         (do (log/debug "No entry at path" root path)
             nil))
       res)))
