@@ -31,6 +31,7 @@
                            #xml/name ::dav/getetag (when sha-1 (str \" sha-1 \"))
                            #xml/name ::dav/resourcetype
                            (case type
+                             ;; here you can see, how to refer to xml names externally
                              :davstore.entry.type/dir (xml/element ::dav/collection)
                              :davstore.entry.type/file (xml/element ::dav/bendlas:file))
                            #xml/name ::dav/getcontentlength (and blob-file (str (.length blob-file))))]

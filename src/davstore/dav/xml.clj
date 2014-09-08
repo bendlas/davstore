@@ -3,28 +3,62 @@
             [clojure.core.match :refer [match]]
             [clojure.tools.logging :as log]))
 
+;; # Namespaced xml parsing
+
+;; ## Set up runtime - global keyword prefixes
+;; They can be used to denote namespaced xml names in as regular clojure keywords
+
+(xml/defns "DAV:" ;; e.g. ::props -> :davstore.dav.xml/props -> {DAV:}props
+  :bendlas "//dav.bendlas.net/extension-elements") ;; e.g. ::bendlas:regular-file
+
 (defn multi? [v]
   (or (list? v) (vector? v)))
 
 (defn to-multi [v]
   (if (multi? v) v [v]))
 
-;; XML output
+(defn error! [& {:as attrs}]
+  (throw (ex-info (str "XML parsing error " attrs) attrs)))
 
-#_(defn pipe [writer-f]
-    (let [pis (java.io.PipedInputStream. 1024)
-          wrt (future (with-open [pos (java.io.PipedOutputStream. pis)]
-                        (try (writer-f pos)
-                             (catch Exception e
-                               (log/error e "In pipe writer")))))]
-      pis))
+(defn parse-props [props]
+  (reduce (fn [pm prop]
+            (match [prop]
+                   ;; FIXME: The parser should be able to parse in a namespace-local mode
+                   ;; to keywordize names mentioned in the defns clause
+                   [{:tag #xml/name ::allprop}]
+                   (assoc pm ::all true)
+                   [{:tag #xml/name ::propname}]
+                   (assoc pm ::names-only true)
+                   [{:tag #xml/name ::prop
+                     :content content}]
+                   (reduce (fn [pm {pn :tag pv :content}]
+                             (assoc pm pn pv))
+                           pm content)
+                   :else (error! :no-match (pr-str prop))))
+          {} props))
+
+(defn parse-propfind [pf]
+  (match [pf]
+         [{:tag #xml/name ::propfind
+           :content props}]
+         (parse-props props)))
+
+;; # XML output
 
 (defn emit [xt]
-  ;; (log/debug "BODY" (with-out-str (clojure.pprint/pprint xt)))
+  ;; FIXME: Should the emitter be able to pick up a defns clause?
+  ;; What about foreign names?
+  ;; Auto shorten prefix?
+  ;; Need to predeclare?
+  ;; Declare inline in emitter, taking space cost?
   (with-open [w (java.io.StringWriter. 1024)]
     (xml/emit
      (-> xt
+                                        ; DAV: needs to have a prefix
+                                        ; (not default namespace)
+                                        ; for windows compatibility
          (assoc-in [:attrs :xmlns/d] "DAV:")
+                                        ; reserved for custom attributes
          (assoc-in [:attrs :xmlns/b] "//dav.bendlas.net/extension-elements"))
      w)
     (.toString w)))
@@ -36,9 +70,6 @@
               :when (.startsWith name "HTTP_")
               :let [code (.get f java.net.HttpURLConnection)]]
           [code name])))
-
-(xml/defns "DAV:"
-  :bendlas "//dav.bendlas.net/extension-elements")
 
 (defn- element [name content]
   (xml/element* (xml/xml-name name) nil content))
@@ -70,30 +101,3 @@
   (xml/element* ::multistatus nil
                 (for [[href s-o-ps] href-s-o-ps]
                   (response href s-o-ps))))
-
-;; XML input
-
-(defn error! [& {:as attrs}]
-  (throw (ex-info (str "XML parsing error " attrs) attrs)))
-
-(defn parse-props [props]
-  (reduce (fn [pm prop]
-            (match [prop]
-                   [{:tag #xml/name ::allprop}]
-                   (assoc pm ::all true)
-                   [{:tag #xml/name ::propname}]
-                   (assoc pm ::names-only true)
-                   [{:tag #xml/name ::prop
-                     :content content}]
-                   (reduce (fn [pm {pn :tag pv :content}]
-                             (assoc pm pn pv))
-                           pm content)
-                   :else (error! :no-match (pr-str prop))))
-          {} props))
-
-(defn parse-propfind [pf]
-  (match [pf]
-         [{:tag #xml/name ::propfind
-           :content props}]
-         (parse-props props)))
-

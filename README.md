@@ -3,6 +3,8 @@
 A Clojure WebDAV server backed by a git-like blob store and a datomic
 database to hold the directory structure.
 
+This started as a demo app for namespaced xml in clojure, but grew pretty practical.
+
 ## Usage
 
 To quickly start a server from a checkout
