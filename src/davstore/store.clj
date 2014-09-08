@@ -151,7 +151,7 @@
                                       [?id :davstore.entry/name ?name]]
                                     db dir-id child-name))]
     (assert (= 1 (count name-entries)))
-    (log/spy (ffirst name-entries))))
+    (ffirst name-entries)))
 
 (ann path-entries [Db DbId Path -> (Option (Vec Entity))])
 (defn path-entries
