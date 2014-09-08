@@ -63,7 +63,7 @@ The single-level git sha-1 radix tree is Mr. Torvalds' output of what must have 
 ### ... not actually be git-compatible?
 This project's priority is to maximise serving performance from the blob storage. That rules out the transparent compression.
 
-The file header is also omitted, in order to be able to respond with a plain `java.util.File` object (in contrast to a an nio channel). This should maximise the chance, that zero-copy serving (sendfile(2)) will be empolyed with any given java server.
+The file header is also omitted, in order to be able to respond with a plain `java.util.File` object (in contrast to a an nio channel). This should maximise the chance, that zero-copy serving (sendfile(2)) will be employed with any given java server.
 
 ### ... use datomic?
 Because didn't you always want an undo slider on your web resources / network share? It just fits perfectly with content addressed file blobs.
