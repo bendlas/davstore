@@ -25,6 +25,8 @@
             (match [prop]
                    ;; FIXME: The parser should be able to parse in a namespace-local mode
                    ;; to keywordize names mentioned in the defns clause
+                   ;; But maybe not, because then equal parses from different ns
+                   ;; wouldn't be = anymore
                    [{:tag #xml/name ::allprop}]
                    (assoc pm ::all true)
                    [{:tag #xml/name ::propname}]
