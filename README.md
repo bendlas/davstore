@@ -46,7 +46,18 @@ Directory structures are stored in datomic.
 
 ## Why ...
 
-### ... steal git's file structure?
+### ... at all?
+User managed content in web applications is a pain: One would like to have all changable content in the database, but most database engines are bad at storing large byte arrays. That's what the file system is for.
+
+Incidentally users also want to have a file-system-like view via a net mount. Also, we developers want a net mount, so that our web app is not the only quick interface to user-accessible files.
+
+But letting the user directly interact with the file system, e.g. via an FTP server, is also horrible:
+- Your server wants to get notified when something changes
+- Accidental modification should not be usual and easily detectable
+- File names should not be subject to the idiosyncracies of the underlying file system
+- Files with identical content should be deduplicated
+
+### ... steal git's file structure for blobs?
 The single-level git sha-1 radix tree is Mr. Torvalds' output of what must have been a comparatively long hammocking session over a principally simple question, that he is uniquely qualified to answer: What's the best tradeoff between collision-freeness, name-length, file-seek performance and input performance, with priority to file-seek performance.
 
 ### ... not actually be git-compatible?
@@ -90,6 +101,7 @@ A few thoughts:
 - Serialize and restore directory structure from / to blob storage.
 - Make core.typed check it.
 - Split it up more.
+- Git import/export
 
 ## License
 
