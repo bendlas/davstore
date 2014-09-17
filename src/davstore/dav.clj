@@ -115,13 +115,13 @@
 
 (defhandler options [_ _]
   {:status 200
-   :headers {"DAV" "1"}})
+   :headers {"DAV" "2"}})
 
 (defhandler propfind [path {:as req
                             store :davstore.app/store
                             {:strs [depth content-length]} :headers
                             uri :uri}]
-  (log/info "PROPFIND" uri (pr-str path) "depth" depth)
+;  (log/info "PROPFIND" uri (pr-str path) "depth" depth)
   (if-let [fs (seq (store/ls store (remove blank? path) 
                              (case depth
                                "0" 0
@@ -136,7 +136,7 @@
     {:status 404}))
 
 (defhandler read [path {:as req store :davstore.app/store uri :uri}]
-  (log/info "GET" uri (pr-str path))
+;  (log/info "GET" uri (pr-str path))
   (let [db (store/store-db store)]
     (loop [{:as entry
             :keys [::dfc/mime-type ::de/type ::dfc/sha-1 ::dd/index-file db/id]}
@@ -154,14 +154,14 @@
 
 (defhandler mkcol [path {:as req uri :uri store :davstore.app/store}]
   ;; FIXME normalize path for all
-  (log/info "MKCOL" uri (pr-str path))
+;  (log/info "MKCOL" uri (pr-str path))
   (store/mkdir! store (remove blank? path))
   (created uri))
 
 (defhandler delete [path {:as req store :davstore.app/store
                           {etag "if-match"
                            depth "depth"} :headers}]
-  (log/info "DELETE" (:uri req) (pr-str path))
+;  (log/info "DELETE" (:uri req) (pr-str path))
   (store/rm! store (remove blank? path) (or (parse-etag etag) :current)
              (case depth
                "0" false
@@ -172,7 +172,7 @@
 (defhandler move [path {:as req store :davstore.app/store
                         {:strs [depth overwrite destination]} :headers
                         uri :uri}]
-  (log/info "MOVE" uri (pr-str path) "to" destination)
+;  (log/info "MOVE" uri (pr-str path) "to" destination)
   (match [(store/mv! store (remove blank? path)
                      (to-path req destination)
                      (case depth
@@ -193,7 +193,7 @@
 (defhandler copy [path {:as req store :davstore.app/store
                         {:strs [depth overwrite destination]} :headers
                         uri :uri}]
-  (log/info "COPY" uri (pr-str path) "to" destination)
+;  (log/info "COPY" uri (pr-str path) "to" destination)
   (match [(store/cp! store (remove blank? path)
                      (to-path req destination)
                      (case depth
@@ -215,18 +215,45 @@
                        body :body
                        {:strs [content-type if-match]} :headers
                        uri :uri}]
-  (log/info "PUT" uri (pr-str path))
+                                        ;  (log/info "PUT" uri (pr-str path))
   (let [blob-sha (blob/store-file (:blob-store store) body)
         path (remove blank? path)
+        fname (last path)
         ctype (if (or (nil? content-type)
                       (= "application/octet-stream" content-type))
                 (infer-type (blob/get-file (:blob-store store) blob-sha)
-                            (last path))
+                            fname)
                 content-type)]
-    (store/touch! store path
-                  ctype
-                  blob-sha
-                  (or (parse-etag if-match) :current))))
+    (match [(store/touch! store path
+                          ctype
+                          blob-sha
+                          (or (parse-etag if-match) :current))]
+           [{:success :updated}] {:status 204}
+           [{:success :created}] (created uri))))
+
+(defhandler proppatch [path {:as req store :davstore.app/store
+                             body :body}]
+  {:status 405})
+
+(defhandler lock [path {:as req store :davstore.app/store
+                        {:strs [depth]} :headers
+                        body :body}]
+  (let [entry (store/get-entry store (remove blank? path))
+        info (dav/parse-lockinfo (xml/parse body))]
+    ;; (log/debug "Lock Info\n" (pprint-str info))
+    {:status (if entry 200 201)
+     :body (dav/emit
+            (dav/props
+             {#xml/name ::dav/lockdiscovery
+              (dav/activelock (assoc info
+                                :depth depth
+                                :timeout "Second-60"
+                                :token (java.util.UUID/randomUUID)))}))}))
+
+(defhandler unlock [path {:as req store :davstore.app/store
+                          {:strs [lock-token]} :headers}]
+  ;; (log/info "unlock token" lock-token)
+  {:status 204})
 
 (defn wrap-errors [h]
   (fn [req]

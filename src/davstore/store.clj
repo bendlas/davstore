@@ -11,12 +11,13 @@
             [webnf.datomic.query :refer [reify-entity entity-1 id-1 by-attr by-value]]
             [clojure.repl :refer :all]
             [clojure.pprint :refer :all]
+            [datomic.api :as d :refer [q tempid transact transact-async create-database connect]]
             [clojure.core.typed :as typ :refer
              [ann ann-form cf defalias
               Bool List HMap HVec Map Set Vec Value IFn Option Keyword Seqable Future 
               U I Rec Any All]]))
 
-(require '[datomic.api :as d :refer [q tempid transact transact-async create-database connect]])
+;(require ')
 
 ;; # Type declaractions
 
@@ -344,9 +345,9 @@
 
 (defn cp-tx [parent-id entry]
   (let [tid (d/tempid :db.part/davstore.entries)]
-    (list* (dissoc (into {:db/id tid} entry) :davstore.dir/children)
-           [:db/add parent-id :davstore.dir/children tid]
-           (mapcat #(cp-tx tid %) (:davstore.dir/children entry)))))
+    (list* (dissoc (into {:db/id tid} entry) ::dd/children)
+           [:db/add parent-id ::dd/children tid]
+           (mapcat #(cp-tx tid %) (::dd/children entry)))))
 
 (ann cp! [Store Path Path Bool -> OpResult])
 (deffileop cp! "COPY" [{:keys [conn root] :as store}
@@ -364,21 +365,25 @@
     (log/debug "cp success" res)
     {:success :copied}))
 
+(defn mv-tx [from-parent-id to-parent-id entry-id new-name]
+  (cons [:db/add entry-id ::de/name new-name]
+        (when-not (= from-parent-id to-parent-id)
+          [[:db/retract from-parent-id ::dd/children entry-id]
+           [:db/add to-parent-id ::dd/children entry-id]])))
+
 (ann mv! [Store Path Path Bool -> OpResult])
 (deffileop mv! "MOVE" [{:keys [conn root] :as store}
                        from-path to-path recursive overwrite]
   (when (= from-path (take (count from-path) to-path))
-            (throw (ex-info "Cannot move entry into itself"
-                            {:error :target-removed :path to-path})))
+    (throw (ex-info "Cannot move entry into itself"
+                    {:error :target-removed :path to-path})))
   (let [db (store-db store)
-        {:as from from-entry :current-entry} (entry-info! db root from-path)
+        {:as from from-parent :parent from-entry :current-entry} (entry-info! db root from-path)
         {:as to to-parent :parent to-entry :current-entry} (entry-info! db root to-path)
         tx (concat (cp-cas from to recursive overwrite)
                    (when to-entry
                      [[:db.fn/retractEntity (:db/id to-entry)]])
-                   (cp-tx (:db/id to-parent)
-                          (-> (into {} from-entry)
-                              (assoc ::de/name (last to-path)))))
+                   (mv-tx (:db/id from-parent) (:db/id to-parent) (:db/id from-entry) (last to-path)))
         res @(transact conn tx)]
     (log/debug "mv success" res)
     (if to-entry

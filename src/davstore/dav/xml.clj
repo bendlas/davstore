@@ -45,6 +45,28 @@
            :content props}]
          (parse-props props)))
 
+(defn parse-lock [lock-props]
+  (reduce (fn [lm prop]
+            (match [prop]
+                   [{:tag #xml/name ::lockscope
+                     :content ([scope] :seq)}]
+                   (assoc lm :scope (match [scope]
+                                           [{:tag #xml/name ::exclusive}] :exclusive
+                                           [{:tag #xml/name ::shared}] :shared))
+                   [{:tag #xml/name ::locktype
+                     :content ([{:tag #xml/name ::write}] :seq)}]
+                   (assoc lm :type :write)
+                   [{:tag #xml/name ::owner
+                     :content owner-info}]
+                   (assoc lm :owner owner-info)))
+          {} lock-props))
+
+(defn parse-lockinfo [li]
+  (match [li]
+         [{:tag #xml/name ::lockinfo
+           :content lock}]
+         (parse-lock lock)))
+
 ;; # XML output
 
 (defn emit [xt]
@@ -74,15 +96,13 @@
           [code name])))
 
 (defn- element [name content]
-  (xml/element* (xml/xml-name name) nil content))
+  (xml/element* (xml/xml-name name) nil (to-multi content)))
 
-(defn- props [ps]
+(defn props [ps]
   (xml/element* ::prop nil
                 (for [[n v] ps
                       :when v]
-                  (if (multi? v)
-                    (element n v)
-                    (element n [v])))))
+                  (element n v))))
 
 (defn- status [code]
   (xml/element ::status nil (if (number? code)
@@ -103,3 +123,15 @@
   (xml/element* ::multistatus nil
                 (for [[href s-o-ps] href-s-o-ps]
                   (response href s-o-ps))))
+
+(defn- dav-prop [kw]
+  {:tag (xml/xml-name "DAV:" (name kw))})
+
+(defn activelock [{:keys [scope type owner depth timeout token]}]
+  (element ::activelock
+           [(element ::locktype (dav-prop type))
+            (element ::lockscope (dav-prop scope))
+            (element ::depth depth)
+            (element ::owner owner)
+            (element ::timeout timeout)
+            (element ::locktoken (element ::href (str "urn:uuid:" token)))]))

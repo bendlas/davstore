@@ -8,12 +8,15 @@
   :repositories [["bendlas-nexus" {:url "http://nexus.bendlas.net/content/groups/public"
                                    :username "fetch" :password :gpg}]]
   :dependencies [[org.clojure/clojure "1.7.0-alpha1"]
-                 [webnf/base "0.0.12-SNAPSHOT"]
+                 [org.clojure/core.typed "0.2.67"]
+                 [net.bendlas/data.xml "1.0.0-SNAPSHOT"]
+                 [webnf/base "0.0.12-SNAPSHOT"
+                  :exclusions [org.clojure/data.xml]]
                  [webnf/handler "0.0.12-SNAPSHOT"]
                  [webnf/datomic "0.1.0-SNAPSHOT"]
                  [webnf/enlive.clj "0.0.4-SNAPSHOT"]
-                 [webnf.deps/universe "0.0.1-SNAPSHOT"]
-                 [net.bendlas/data.xml "1.0.0-SNAPSHOT"]
+                 [webnf.deps/universe "0.0.1-SNAPSHOT"
+                  :exclusions [org.clojure/data.xml]]
                  [ring/ring-jetty-adapter "1.3.0"]
                  [cider/cider-nrepl "0.8.0-SNAPSHOT"]]
   :plugins [[lein-ring "0.8.11"]]

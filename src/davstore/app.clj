@@ -62,8 +62,9 @@
              :move (dav/move path)
              :delete (dav/delete path)
              :put (dav/put path)
-             #_(:proppatch (dav/proppatch path)
-                           )}))
+             :proppatch (dav/proppatch path)
+             :lock (dav/lock path)
+             :unlock (dav/unlock path)}))
 
 (def blob-dir "/tmp/davstore-app")
 (def db-uri "datomic:mem://davstore-app")
@@ -81,6 +82,13 @@
       (log/debug " => RESPONSE" (with-out-str (pprint resp)))
       resp)))
 
+(defn wrap-log-light [h]
+  (fn [req]
+    (let [resp (h req)]
+      (log/debug (.toUpperCase (name (:request-method req)))
+                 (:uri req) " => " (:status resp))
+      resp)))
+
 ;; Quick and embedded dav server
 
 (require '[ring.adapter.jetty :as rj])
@@ -91,7 +99,7 @@
   (def davstore
     (app
      (wrap-store blob-dir db-uri root-id "/files")
-     ;; wrap-log
+     wrap-log-light
      ["blob" &] blob-handler
      ["files" &] file-handler
      ["debug"] (fn [req] {:status 400 :debug req})))
@@ -108,4 +116,4 @@
 
 (defn get-handler-store
   ([] (get-handler-store davstore))
-  ([h] (::store (:debug (h {:uri "/debug"})))))
+  ([h] (::store (:debug (h {:request-method :debug :uri "/debug"})))))
