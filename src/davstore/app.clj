@@ -84,10 +84,22 @@
 
 (defn wrap-log-light [h]
   (fn [req]
-    (let [resp (h req)]
-      (log/debug (.toUpperCase (name (:request-method req)))
-                 (:uri req) " => " (:status resp))
-      resp)))
+    (try
+      (let [resp (h req)]
+        (log/debug (.toUpperCase (name (:request-method req)))
+                   (:uri req) " => " (:status resp))
+        resp)
+      (catch Exception e
+        (log/error e (.toUpperCase (name (:request-method req)))
+                   (:uri req) " => " 500)))))
+
+(defn wrap-access-control [h allow-origin]
+  (fn [req]
+    (update-in (h req) [:headers] merge
+               {"access-control-allow-origin" allow-origin
+                "access-control-allow-credentials" "true"
+                "access-control-allow-methods" "OPTIONS,GET,PUT,DELETE,PROPFIND,REPORT,MOVE,COPY,PROPPATCH"
+                "access-control-allow-headers" "Content-Type,Depth,Cache-Control,X-Requested-With,If-Modified-Since,If-Match,If,X-File-Name,X-File-Size,Destination,Overwrite"})))
 
 ;; Quick and embedded dav server
 
@@ -100,6 +112,7 @@
     (app
      (wrap-store blob-dir db-uri root-id "/files")
      wrap-log-light
+     (wrap-access-control "http://localhost:8080")
      ["blob" &] blob-handler
      ["files" &] file-handler
      ["debug"] (fn [req] {:status 400 :debug req})))

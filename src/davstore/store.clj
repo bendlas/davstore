@@ -8,7 +8,7 @@
   (:require [davstore.schema :refer [ensure-schema! alias-ns]]
             [davstore.blob :as blob :refer [make-store store-file get-file BlobStore]]
             [clojure.tools.logging :as log]
-            [webnf.datomic.query :refer [reify-entity entity-1 id-1 by-attr by-value]]
+            [webnf.datomic.query :refer [reify-entity entity-1 id-1 id-list by-attr by-value]]
             [clojure.repl :refer :all]
             [clojure.pprint :refer :all]
             [datomic.api :as d :refer [q tempid transact transact-async create-database connect]]
@@ -363,7 +363,11 @@
                               (assoc ::de/name (last to-path)))))
         res @(transact conn tx)]
     (log/debug "cp success" res)
-    {:success :copied}))
+    (if to-entry
+      {:success :copied
+       :result :overwritten}
+      {:success :copied
+       :result :created})))
 
 (defn mv-tx [from-parent-id to-parent-id entry-id new-name]
   (cons [:db/add entry-id ::de/name new-name]
@@ -529,3 +533,46 @@
  (defn pr-tree [store]
    (doseq [s (print-entry (get-entry store []) 0)]
      (print s))))
+
+(defn pprint-tx [db datoms]
+  (reduce (fn [out [e a v]]
+            (let [il (dec (count out))
+                  lst (when-not (neg? il) (nth out il))
+                  akw (d/ident db a)]
+              (cond
+               (and (map? lst)
+                    (= e (:db/id lst)))
+               (assoc out il (assoc lst akw v))
+               (= e (first lst))
+               (assoc out il {:db/id e
+                              (nth lst 1) (nth lst 2)
+                              akw v})
+               :else (conj out [e akw v]))))
+          [] (sort-by :e datoms)))
+
+(defn changed-entries [db datoms]
+  (let [txi (d/entid db :db/txInstant)
+        det (d/entid db ::de/type)
+        inst-res (d/q [:find '?i :where ['_ txi '?i]] datoms)
+        inst (ffirst inst-res)]
+    (assert (= 1 (count inst-res)))
+    (for [[e a _ _ added] datoms
+          :when (= det a)]
+      [e (when added inst)])))
+
+(defn find-cm-instants [conn]
+  (let [db (d/db conn)]
+    (reduce (fn [cms {:keys [data]}]
+              (reduce (fn [cms [eid txi]]
+                        (if txi
+                          (assoc cms eid
+                                 (if-let [erec (get cms eid)]
+                                   (assoc erec :last-mod txi)
+                                   {:created txi :last-mod txi}))
+                          (dissoc cms eid)))
+                      cms (changed-entries db data)))
+            {} (d/tx-range (d/log conn) nil nil))))
+
+(defn cm-instants-tx [cm-instants]
+  (for [[e {:keys [created last-mod]}] cm-instants]
+    ))
