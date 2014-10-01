@@ -22,10 +22,6 @@
   (let [props (assoc-when* (fn* ([k] (or all (contains? want-props k)))
                                 ([k v] (not (nil? v))))
                            {}
-                           ;; the reader tags here are nessecary, because the parser QName instances
-                           ;; and we compare them with =
-                           ;; This could be mitigated by having a clojure namespace - local parser,
-                           ;; but then you need to be careful where the parse comes from
                            ::dav/displayname name
                            ::dav/getcontenttype mime-type
                            ::dav/getetag (when sha-1 (str \" sha-1 \"))
