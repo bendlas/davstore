@@ -27,11 +27,11 @@
                    ;; to keywordize names mentioned in the defns clause
                    ;; But maybe not, because then equal parses from different ns
                    ;; wouldn't be = anymore
-                   [{:tag #xml/name ::allprop}]
+                   [{:tag ::allprop}]
                    (assoc pm ::all true)
-                   [{:tag #xml/name ::propname}]
+                   [{:tag ::propname}]
                    (assoc pm ::names-only true)
-                   [{:tag #xml/name ::prop
+                   [{:tag ::prop
                      :content content}]
                    (reduce (fn [pm {pn :tag pv :content}]
                              (assoc pm pn pv))
@@ -41,29 +41,29 @@
 
 (defn parse-propfind [pf]
   (match [pf]
-         [{:tag #xml/name ::propfind
+         [{:tag ::propfind
            :content props}]
          (parse-props props)))
 
 (defn parse-lock [lock-props]
   (reduce (fn [lm prop]
             (match [prop]
-                   [{:tag #xml/name ::lockscope
+                   [{:tag ::lockscope
                      :content ([scope] :seq)}]
                    (assoc lm :scope (match [scope]
-                                           [{:tag #xml/name ::exclusive}] :exclusive
-                                           [{:tag #xml/name ::shared}] :shared))
-                   [{:tag #xml/name ::locktype
-                     :content ([{:tag #xml/name ::write}] :seq)}]
+                                           [{:tag ::exclusive}] :exclusive
+                                           [{:tag ::shared}] :shared))
+                   [{:tag ::locktype
+                     :content ([{:tag ::write}] :seq)}]
                    (assoc lm :type :write)
-                   [{:tag #xml/name ::owner
+                   [{:tag ::owner
                      :content owner-info}]
                    (assoc lm :owner owner-info)))
           {} lock-props))
 
 (defn parse-lockinfo [li]
   (match [li]
-         [{:tag #xml/name ::lockinfo
+         [{:tag ::lockinfo
            :content lock}]
          (parse-lock lock)))
 

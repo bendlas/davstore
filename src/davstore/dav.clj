@@ -26,17 +26,17 @@
                            ;; and we compare them with =
                            ;; This could be mitigated by having a clojure namespace - local parser,
                            ;; but then you need to be careful where the parse comes from
-                           #xml/name ::dav/displayname name
-                           #xml/name ::dav/getcontenttype mime-type
-                           #xml/name ::dav/getetag (when sha-1 (str \" sha-1 \"))
-                           #xml/name ::dav/getlastmodified "Wed, 15 Nov 1995 04:58:08 GMT"
-                           #xml/name ::dav/creationdate "Wed, 15 Nov 1995 04:58:08 GMT"
-                           #xml/name ::dav/resourcetype
+                           ::dav/displayname name
+                           ::dav/getcontenttype mime-type
+                           ::dav/getetag (when sha-1 (str \" sha-1 \"))
+                           ::dav/getlastmodified "Wed, 15 Nov 1995 04:58:08 GMT"
+                           ::dav/creationdate "Wed, 15 Nov 1995 04:58:08 GMT"
+                           ::dav/resourcetype
                            (case type
                              ;; here you can see, how to refer to xml names externally
                              :davstore.entry.type/dir (xml/element ::dav/collection)
                              :davstore.entry.type/file (xml/element ::dav/bendlas:file))
-                           #xml/name ::dav/getcontentlength (and blob-file (str (.length blob-file))))]
+                           ::dav/getcontentlength (and blob-file (str (.length blob-file))))]
     (if names-only
       (map-vals (constantly nil) props)
       props)))
@@ -131,7 +131,7 @@
                                "infinity" 65536)))]
     (let [want-props (if (= "0" content-length)
                        {::dav/all true}
-                       (dav/parse-propfind (xml/parse (:body req))))]
+                       (dav/parse-propfind (xml/parse* 'davstore.dav.xml (:body req))))]
       {:status 207 :headers {"content-type" "text/xml; charset=utf-8" "dav" "1"}
        :body (dav/emit (dav/multistatus
                         (propfind-status (:root-dir store) fs want-props)))})
@@ -241,7 +241,7 @@
                         {:strs [depth]} :headers
                         body :body}]
   (let [entry (store/get-entry store (remove blank? path))
-        info (dav/parse-lockinfo (xml/parse body))]
+        info (dav/parse-lockinfo (xml/parse* 'davstore.dav.xml body))]
     ;; (log/debug "Lock Info\n" (pprint-str info))
     {:status (if entry 200 201)
      :body (dav/emit

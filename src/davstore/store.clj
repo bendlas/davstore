@@ -573,6 +573,6 @@
                       cms (changed-entries db data)))
             {} (d/tx-range (d/log conn) nil nil))))
 
-(defn cm-instants-tx [cm-instants]
-  (for [[e {:keys [created last-mod]}] cm-instants]
-    ))
+#_(defn cm-instants-tx [cm-instants]
+    (for [[e {:keys [created last-mod]}] cm-instants]
+      ))
