@@ -25,8 +25,8 @@
                            ::dav/displayname name
                            ::dav/getcontenttype mime-type
                            ::dav/getetag (when sha-1 (str \" sha-1 \"))
-                           ::dav/getlastmodified "Wed, 15 Nov 1995 04:58:08 GMT"
-                           ::dav/creationdate "Wed, 15 Nov 1995 04:58:08 GMT"
+;                           ::dav/getlastmodified "Wed, 15 Nov 1995 04:58:08 GMT"
+;                           ::dav/creationdate "Wed, 15 Nov 1995 04:58:08 GMT"
                            ::dav/resourcetype
                            (case type
                              ;; here you can see, how to refer to xml names externally
