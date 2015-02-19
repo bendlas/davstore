@@ -1,65 +1,10 @@
 (ns davstore.schema
   (:import java.util.UUID)
   (:require
-   [clojure.core.typed :as typ :refer
-    [ann ann-form cf defalias non-nil-return typed-deps
-     Bool List HMap HVec Map Set Vec Value IFn Option Keyword Seqable Future Coll
-     U I Rec Any All]]))
-
-(require '[datomic.api :as d :refer [tempid]])
-(require '[webnf.datomic :refer [field enum function defn-db]])
-(require '[webnf.datomic.version :as ver])
-(import datomic.db.Db)
-
-(ann webnf.datomic/extract-fn (All [f] [Db Keyword -> f]))
-(ann clojure.core/sort-by
-     (All [a b] ;[[a -> b] (java.util.Comparator b) (Seqable a) -> (Seqable a)]
-          [[a -> b] (Seqable a) -> (List a)]))
-
-(non-nil-return java.security.MessageDigest/getInstance :all)
-(non-nil-return java.security.MessageDigest/digest :all)
-(non-nil-return javax.xml.bind.DatatypeConverter/printHexBinary :all)
-(non-nil-return javax.xml.bind.DatatypeConverter/parseHexBinary :all)
-(non-nil-return java.lang.String/toLowerCase :all)
-
-(ann clojure.repl/pst [Throwable -> nil])
-
-(defalias Logger Object)
-(defalias LoggerFactory Object)
-(ann clojure.tools.logging.impl/get-logger [LoggerFactory clojure.lang.Namespace -> Logger])
-(ann clojure.tools.logging.impl/enabled? [Logger Keyword -> Bool])
-(ann clojure.tools.logging/*logger-factory* LoggerFactory)
-(ann clojure.tools.logging/log* [Logger Keyword (Option Throwable) String -> nil])
-
-(defalias DbId (U datomic.db.DbId Long Keyword (HVec [Keyword Any])))
-
-(defalias Sha1B (Array byte))
-(defalias Sha1 String)
-
-(defalias Entity
-  (Rec [entity]
-       (I (Map Keyword Any)
-          (HMap :optional
-                {:db/id DbId
-                 :davstore.entry/name String
-                 :davstore.entry/type (U (Value :davstore.entry.type/container)
-                                         (Value :davstore.entry.type/file))
-                 :davstore.container/children (Set entity)
-                 :davstore.container/_children (Set entity)
-                 :davstore.entry/sha1 Sha1
-                 :davstore.root/dir entity}))))
-
-(defalias TxItem (U (HVec [Keyword Any *])
-                    Entity))
-(defalias Tx (Seqable TxItem))
-(ann datomic.api/db [datomic.Connection -> datomic.db.Db])
-(ann datomic.api/entity [datomic.db.Db DbId -> Entity])
-(ann datomic.api/tempid (IFn [Keyword -> datomic.db.DbId]
-                             [Keyword Long -> datomic.db.DbId]))
-(ann datomic.api/squuid [-> UUID])
-
-(defalias PathElem String)
-(defalias Path (List PathElem))
+   [datomic.api :as d :refer [tempid]]
+   [webnf.datomic :refer [field enum function defn-db]]
+   [webnf.datomic.version :as ver]
+   [webnf.base :refer [pprint]]))
 
 (defmacro alias-ns [alias ns-sym & ans]
   `(do (create-ns '~ns-sym)
@@ -107,8 +52,7 @@
 (def schema-ident :davstore/schema)
 (def schema-version "1.1")
 
-(ann schema Tx)
-(def ^:no-check schema
+(def schema
   (-> [{:db/id (tempid :db.part/db)
         :db/ident :db.part/davstore.entries
         :db.install/_partition :db.part/db}
