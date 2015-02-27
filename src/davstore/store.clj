@@ -6,7 +6,7 @@
            (java.util UUID Date)
            datomic.db.Db)
   (:require [davstore.schema :refer [ensure-schema! alias-ns]]
-            [davstore.blob :as blob :refer [make-store store-file get-file BlobStore]]
+            [davstore.blob :as blob :refer [make-store store-file get-file]]
             [clojure.tools.logging :as log]
             [webnf.datomic.query :refer [reify-entity entity-1 id-1 id-list by-attr by-value]]
             [clojure.repl :refer :all]

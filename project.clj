@@ -1,4 +1,4 @@
-(defproject davstore "0.1.0-alpha1"
+(defproject davstore "0.1.0-alpha2"
   :description "A file storage component with three parts:
     - A blob store, storing in a git-like content-addressing scheme
     - A datomic schema to store blob references with metadata
