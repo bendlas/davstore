@@ -3,7 +3,7 @@
            (java.io ByteArrayOutputStream OutputStreamWriter
                     InputStream OutputStream)
            (java.security MessageDigest)
-           java.util.UUID
+           (java.util UUID Date)
            datomic.db.Db)
   (:require [davstore.schema :refer [ensure-schema! alias-ns]]
             [davstore.blob :as blob :refer [make-store store-file get-file BlobStore]]
@@ -173,8 +173,14 @@
         (entry-info! db root path)
         _ (match-entry! current-entry match-sha-1 ::det/file)
         id* (if current-entry id (tempid :db.part/davstore.entries))
+        cur-date (Date.)
         tx (concat cas-tx
-                   [[:db/add id* ::dfc/mime-type mime-type]]
+                   [[:db/add id* ::dfc/mime-type (or mime-type "application/octet-stream")]
+                    [:db/add id* ::de/last-modified cur-date]
+                    [:db/add parent-id ::de/last-modified cur-date]]
+                   (when (or (not current-entry)
+                             (= match-sha-1 :current))
+                     [[:db/add id* ::de/created cur-date]])
                    (if current-entry
                      [[:db.fn/cas id* ::dfc/sha-1
                        (if (= :current match-sha-1)
@@ -208,10 +214,13 @@
                              :cas/expected nil
                              :cas/current type})))
         id* (tempid :db.part/davstore.entries)
+        cur-date (Date.)
         tx (cons {:db/id (tempid :db.part/davstore.entries)
                   ::dd/_children parent-id
                   ::de/name (last path)
-                  ::de/type ::det/dir}
+                  ::de/type ::det/dir
+                  ::de/created cur-date
+                  ::de/last-modified cur-date}
                  cas-tx)
         res @(transact conn tx)]
     (log/debug "Mkdir success" res)
@@ -228,7 +237,8 @@
             (throw (ex-info "Directory not empty"
                             {:error :dir-not-empty
                              :path path})))
-        tx (concat [[:db.fn/retractEntity id]]
+        tx (concat [[:db/add parent-id ::de/last-modified (Date.)]
+                    [:db.fn/retractEntity id]]
                    (when-not recursive
                      [[::dfn/assert-val id ::dd/children nil]])
                    cas-tx)
@@ -260,6 +270,7 @@
   (let [tid (d/tempid :db.part/davstore.entries)]
     (list* (dissoc (into {:db/id tid} entry) ::dd/children)
            [:db/add parent-id ::dd/children tid]
+           [:db/add parent-id ::de/last-modified (Date.)]
            (mapcat #(cp-tx tid %) (::dd/children entry)))))
 
 (deffileop cp! "COPY" [{:keys [conn root] :as store}
@@ -282,10 +293,13 @@
        :result :created})))
 
 (defn mv-tx [from-parent-id to-parent-id entry-id new-name]
-  (cons [:db/add entry-id ::de/name new-name]
-        (when-not (= from-parent-id to-parent-id)
-          [[:db/retract from-parent-id ::dd/children entry-id]
-           [:db/add to-parent-id ::dd/children entry-id]])))
+  (let [cur-date (Date.)]
+    (concat [[:db/add entry-id ::de/name new-name]
+             [:db/add from-parent-id ::de/last-modified cur-date]
+             [:db/add to-parent-id ::de/last-modified cur-date]]
+            (when-not (= from-parent-id to-parent-id)
+              [[:db/retract from-parent-id ::dd/children entry-id]
+               [:db/add to-parent-id ::dd/children entry-id]]))))
 
 (deffileop mv! "MOVE" [{:keys [conn root] :as store}
                        from-path to-path recursive overwrite]
@@ -329,20 +343,23 @@
 (defn create-root!
   ([conn uuid] (create-root! conn uuid {}))
   ([conn uuid root-entity]
-     (assert (not (d/entity (d/db conn) [:davstore.root/id uuid])) "Root exists")
-     (let [root-id (tempid :db.part/user)
-           rdir-id (tempid :db.part/davstore.entries)
-           root-dir {:db/id rdir-id
-                     :davstore.entry/name (str \{ uuid \})
-                     :davstore.entry/type :davstore.entry.type/dir}
-           tx [(assoc root-entity
-                 :db/doc (str "File root {" uuid "}")
-                 :db/id root-id
-                 :davstore.root/id uuid
-                 :davstore.root/dir rdir-id)
-               root-dir]
-           {:keys [db-after]} @(transact conn tx)]
-       (d/entity db-after [:davstore.root/id uuid]))))
+   (assert (not (d/entity (d/db conn) [:davstore.root/id uuid])) "Root exists")
+   (let [root-id (tempid :db.part/user)
+         rdir-id (tempid :db.part/davstore.entries)
+         cur-date (Date.)
+         root-dir {:db/id rdir-id
+                   ::de/name (str \{ uuid \})
+                   ::de/type :davstore.entry.type/dir
+                   ::de/created cur-date
+                   ::de/last-modified cur-date}
+         tx [(assoc root-entity
+                    :db/doc (str "File root {" uuid "}")
+                    :db/id root-id
+                    ::dr/id uuid
+                    ::dr/dir rdir-id)
+             root-dir]
+         {:keys [db-after]} @(transact conn tx)]
+     (d/entity db-after [::dr/id uuid]))))
 
 (defn open-root! [{:keys [conn] :as store} uuid create-if-missing]
   (let [db (d/db conn)
@@ -446,30 +463,3 @@
                               akw v})
                :else (conj out [e akw v]))))
           [] (sort-by :e datoms)))
-
-(defn changed-entries [db datoms]
-  (let [txi (d/entid db :db/txInstant)
-        det (d/entid db ::de/type)
-        inst-res (d/q [:find '?i :where ['_ txi '?i]] datoms)
-        inst (ffirst inst-res)]
-    (assert (= 1 (count inst-res)))
-    (for [[e a _ _ added] datoms
-          :when (= det a)]
-      [e (when added inst)])))
-
-(defn find-cm-instants [conn]
-  (let [db (d/db conn)]
-    (reduce (fn [cms {:keys [data]}]
-              (reduce (fn [cms [eid txi]]
-                        (if txi
-                          (assoc cms eid
-                                 (if-let [erec (get cms eid)]
-                                   (assoc erec :last-mod txi)
-                                   {:created txi :last-mod txi}))
-                          (dissoc cms eid)))
-                      cms (changed-entries db data)))
-            {} (d/tx-range (d/log conn) nil nil))))
-
-#_(defn cm-instants-tx [cm-instants]
-    (for [[e {:keys [created last-mod]}] cm-instants]
-      ))

@@ -48,9 +48,8 @@
               :cas/expected nil
               :cas/current name})))
 
-
 (def schema-ident :davstore/schema)
-(def schema-version "1.1")
+(def schema-version "2.0")
 
 (def schema
   (-> [{:db/id (tempid :db.part/db)
@@ -66,8 +65,9 @@
 
        (field "Entry sha-1"
               :davstore.entry.snapshot/sha-1 :string)
-       (field "Entry last modified"
-              :davstore.entry.snapshot/last-modified :instant :index)
+
+       (field "Creation Date" :davstore.entry/created :instant)
+       (field "Last Modified Date" :davstore.entry/last-modified :instant)
 
 
        (field "Global identity of a file root"
@@ -95,3 +95,41 @@
 
 (defn ensure-schema! [conn]
   (ver/ensure-schema! conn schema-ident schema-version schema))
+
+(comment
+  [1.1 -> 2.0]
+  (letfn [(changed-entries [db datoms]
+            (let [txi (d/entid db :db/txInstant)
+                  det (d/entid db ::de/type)
+                  inst (d/q [:find '?i '. :where ['_ txi '?i]] datoms)]
+              (assert inst)
+              (for [[e a _ _ added] datoms
+                    :when (= det a)]
+                [e (when added inst)])))
+
+          (find-cm-instants [conn]
+            (let [db (d/db conn)]
+              (reduce (fn [cms {:keys [data]}]
+                        (reduce (fn [cms [eid txi]]
+                                  (if txi
+                                    (assoc cms eid
+                                           (if-let [erec (get cms eid)]
+                                             (assoc erec :last-mod txi)
+                                             {:created txi :last-mod txi}))
+                                    (dissoc cms eid)))
+                                cms (changed-entries db data)))
+                      {} (d/tx-range (d/log conn) nil nil))))
+
+          (cm-instants-tx [cm-instants]
+            (for [[e {:keys [created last-mod]}] cm-instants]
+              {:db/id e
+               ::de/created created
+               ::de/last-modified last-mod}))
+          (update-11-20 [conn]
+            (let [{db :db-after}
+                  @(d/transact conn (-> [(field "Creation Date" :davstore.entry/created :instant)
+                                         (field "Last Modidied Date" :davstore.entry/last-modified :instant)]
+                                        (into (ver/version-tx schema-ident schema-version nil))))]
+              @(d/sync-schema conn (d/basis-t db))
+              @(d/transact conn (cm-instants-tx (find-cm-instants conn)))))]
+    (update-11-20 davstore.store/conn)))

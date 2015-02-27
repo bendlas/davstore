@@ -2,7 +2,6 @@
   (:require [clojure.core.match :refer [match]]
             [clojure.data.xml :as xml]
             [clojure.string :as str]
-            [clojure.string :refer [blank? split]]
             [clojure.tools.logging :as log]
             [davstore.blob :as blob]
             [davstore.dav.xml :as dav]
@@ -11,28 +10,32 @@
             [datomic.api :as d]
             [ring.util.response :refer [created]]
             [webnf.base :refer [pprint-str]]
-            [webnf.kv :refer [map-vals assoc-when*]])
+            [webnf.kv :refer [map-vals assoc-when*]]
+            [webnf.date :as date])
   (:import java.io.File
            java.net.URI
-           java.nio.file.Files))
+           java.nio.file.Files
+           java.util.Date))
 
 (defn entry-status [{:as want-props :keys [::dav/all ::dav/names-only]}
-                    {:as entry :keys [:davstore.ls/path :davstore.file.content/mime-type :davstore.entry/type
-                                      :davstore.file.content/sha-1 :davstore.entry/name :davstore.ls/blob-file]}]
+                    {:as entry :keys [:davstore.ls/path :davstore.file.content/mime-type
+                                      :davstore.entry/type :davstore.file.content/sha-1
+                                      :davstore.entry/name :davstore.ls/blob-file
+                                      :davstore.entry/created :davstore.entry/last-modified]}]
   (let [props (assoc-when* (fn* ([k] (or all (contains? want-props k)))
                                 ([k v] (not (nil? v))))
                            {}
                            ::dav/displayname name
                            ::dav/getcontenttype mime-type
                            ::dav/getetag (when sha-1 (str \" sha-1 \"))
-;                           ::dav/getlastmodified "Wed, 15 Nov 1995 04:58:08 GMT"
-;                           ::dav/creationdate "Wed, 15 Nov 1995 04:58:08 GMT"
+                           ::dav/getlastmodified (date/format-http (or last-modified (Date. 0)))
+                           ::dav/creationdate (date/format-http (or created (Date. 0)))
                            ::dav/resourcetype
                            (case type
                              ;; here you can see, how to refer to xml names externally
                              :davstore.entry.type/dir (xml/element ::dav/collection)
                              :davstore.entry.type/file (xml/element ::dav/bendlas:file))
-                           ::dav/getcontentlength (and blob-file (str (.length blob-file))))]
+                           ::dav/getcontentlength (and blob-file (str (.length ^File blob-file))))]
     (if names-only
       (map-vals (constantly nil) props)
       props)))
@@ -58,7 +61,7 @@
   (memoize (fn [^String root-dir]
              (fn [^String uri]
                (when (zero? (.indexOf uri root-dir))
-                 (split (subs uri (count root-dir)) #"/"))))))
+                 (str/split (subs uri (count root-dir)) #"/"))))))
 
 (defn to-path [{{:keys [root-dir]
                  :or {root-dir "/"}} :davstore.app/store
@@ -77,7 +80,7 @@
                              {:error :user-error
                               :allowed-root root-dir
                               :request-uri uri})))
-         (remove blank?)
+         (remove str/blank?)
          (map #(java.net.URLDecoder/decode % "UTF-8"))
          vec)))
 
@@ -120,7 +123,7 @@
                             {:strs [depth content-length]} :headers
                             uri :uri}]
 ;  (log/info "PROPFIND" uri (pr-str path) "depth" depth)
-  (if-let [fs (seq (store/ls store (remove blank? path) 
+  (if-let [fs (seq (store/ls store (remove str/blank? path) 
                              (case depth
                                "0" 0
                                "1" 1
@@ -138,7 +141,7 @@
   (let [db (store/store-db store)]
     (loop [{:as entry
             :keys [::dfc/mime-type ::de/type ::dfc/sha-1 ::dd/index-file db/id]}
-           (store/get-entry store (remove blank? path))]
+           (store/get-entry store (remove str/blank? path))]
       (if entry
         (if (= ::det/file type)
           {:status 200
@@ -153,14 +156,14 @@
 (defhandler mkcol [path {:as req uri :uri store :davstore.app/store}]
   ;; FIXME normalize path for all
 ;  (log/info "MKCOL" uri (pr-str path))
-  (store/mkdir! store (remove blank? path))
+  (store/mkdir! store (remove str/blank? path))
   (created uri))
 
 (defhandler delete [path {:as req store :davstore.app/store
                           {etag "if-match"
                            depth "depth"} :headers}]
 ;  (log/info "DELETE" (:uri req) (pr-str path))
-  (store/rm! store (remove blank? path) (or (parse-etag etag) :current)
+  (store/rm! store (remove str/blank? path) (or (parse-etag etag) :current)
              (case depth
                "0" false
                "infinity" true
@@ -171,7 +174,7 @@
                         {:strs [depth overwrite destination]} :headers
                         uri :uri}]
 ;  (log/info "MOVE" uri (pr-str path) "to" destination)
-  (match [(store/mv! store (remove blank? path)
+  (match [(store/mv! store (remove str/blank? path)
                      (to-path req destination)
                      (case depth
                        "0" false
@@ -192,7 +195,7 @@
                         {:strs [depth overwrite destination]} :headers
                         uri :uri}]
 ;  (log/info "COPY" uri (pr-str path) "to" destination)
-  (match [(store/cp! store (remove blank? path)
+  (match [(store/cp! store (remove str/blank? path)
                      (to-path req destination)
                      (case depth
                        "0" false
@@ -215,7 +218,7 @@
                        uri :uri}]
                                         ;  (log/info "PUT" uri (pr-str path))
   (let [blob-sha (blob/store-file (:blob-store store) body)
-        path (remove blank? path)
+        path (remove str/blank? path)
         fname (last path)
         ctype (if (or (nil? content-type)
                       (= "application/octet-stream" content-type))
@@ -236,7 +239,7 @@
 (defhandler lock [path {:as req store :davstore.app/store
                         {:strs [depth]} :headers
                         body :body}]
-  (let [entry (store/get-entry store (remove blank? path))
+  (let [entry (store/get-entry store (remove str/blank? path))
         info (dav/parse-lockinfo (xml/parse* 'davstore.dav.xml body))]
     ;; (log/debug "Lock Info\n" (pprint-str info))
     {:status (if entry 200 201)
