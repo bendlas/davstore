@@ -392,61 +392,60 @@
 
 ;; # Testing and maintenance
 
-(typ/tc-ignore
- ;; maintenance
+;; maintenance
 
 
- ;; dev
+;; dev
 
- (set! *warn-on-reflection* true)
+(set! *warn-on-reflection* true)
 
- (defn cat [store path]
-   (when-let [sha1 (:davstore.file.content/sha-1 (get-entry store path))]
-     (println (slurp (blob-file store sha1)))))
+(defn cat [store path]
+  (when-let [sha1 (:davstore.file.content/sha-1 (get-entry store path))]
+    (println (slurp (blob-file store sha1)))))
 
- (defn- store-str [{:keys [blob-store]} ^String s]
-   (store-file blob-store (java.io.ByteArrayInputStream.
-                           (.getBytes s "UTF-8"))))
+(defn- store-str [{:keys [blob-store]} ^String s]
+  (store-file blob-store (java.io.ByteArrayInputStream.
+                          (.getBytes s "UTF-8"))))
 
- (defn store-tp [store path content]
-   (touch! store path "text/plain; charset=utf-8" (store-str store content) nil))
+(defn store-tp [store path content]
+  (touch! store path "text/plain; charset=utf-8" (store-str store content) nil))
 
- (defn write! [store path content]
-   (touch! store path "text/plain" (store-str store content) nil))
+(defn write! [store path content]
+  (touch! store path "text/plain" (store-str store content) nil))
 
- (defn insert-testdata [{:keys [conn] :as store}]
-   (store-tp store ["a"] "a's content")
-   (store-tp store ["b"] "b's content")
-   (mkdir! store ["d"])
-   (store-tp store ["d" "c"] "d/c's content"))
+(defn insert-testdata [{:keys [conn] :as store}]
+  (store-tp store ["a"] "a's content")
+  (store-tp store ["b"] "b's content")
+  (mkdir! store ["d"])
+  (store-tp store ["d" "c"] "d/c's content"))
 
- (declare test-store)
+(declare test-store)
 
- (defn init-test! []
-   (def test-uri "datomic:mem://davstore-test")
-   (when (bound? #'test-store)
-     (d/delete-database test-uri))
-   (def test-blobstore (make-store "/tmp/davstore-test"))
-   (def test-store (init-store! test-uri test-blobstore))
-   (insert-testdata test-store))
+(defn init-test! []
+  (def test-uri "datomic:mem://davstore-test")
+  (when (bound? #'test-store)
+    (d/delete-database test-uri))
+  (def test-blobstore (make-store "/tmp/davstore-test"))
+  (def test-store (init-store! test-uri test-blobstore))
+  (insert-testdata test-store))
 
- (defmulti print-entry (fn [entry depth] (:davstore.entry/type entry)))
- (defmethod print-entry :davstore.entry.type/dir
-   [{:keys [:db/id ::de/name ::dd/children]} depth]
-   (apply concat
-          (repeat depth "  ")
-          [name "/ #" id "\n"]
-          (map #(print-entry % (inc depth)) children)))
+(defmulti print-entry (fn [entry depth] (:davstore.entry/type entry)))
+(defmethod print-entry :davstore.entry.type/dir
+  [{:keys [:db/id ::de/name ::dd/children]} depth]
+  (apply concat
+         (repeat depth "  ")
+         [name "/ #" id "\n"]
+         (map #(print-entry % (inc depth)) children)))
 
- (defmethod print-entry :davstore.entry.type/file
-   [{:keys [:db/id ::de/name ::dfc/sha-1]} depth]
-   (concat
-    (repeat depth "  ")
-    [name " #" id " - CH: " sha-1 "\n"]))
+(defmethod print-entry :davstore.entry.type/file
+  [{:keys [:db/id ::de/name ::dfc/sha-1]} depth]
+  (concat
+   (repeat depth "  ")
+   [name " #" id " - CH: " sha-1 "\n"]))
 
- (defn pr-tree [store]
-   (doseq [s (print-entry (get-entry store []) 0)]
-     (print s))))
+(defn pr-tree [store]
+  (doseq [s (print-entry (get-entry store []) 0)]
+    (print s)))
 
 (defn pprint-tx [db datoms]
   (reduce (fn [out [e a v]]
