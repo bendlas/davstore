@@ -94,12 +94,15 @@
                    (:uri req) " => " 500)))))
 
 (defn wrap-access-control [h allow-origin]
-  (fn [req]
-    (update-in (h req) [:headers] merge
-               {"access-control-allow-origin" allow-origin
-                "access-control-allow-credentials" "true"
-                "access-control-allow-methods" "OPTIONS,GET,PUT,DELETE,PROPFIND,REPORT,MOVE,COPY,PROPPATCH"
-                "access-control-allow-headers" "Content-Type,Depth,Cache-Control,X-Requested-With,If-Modified-Since,If-Match,If,X-File-Name,X-File-Size,Destination,Overwrite"})))
+  (let [hdr {"access-control-allow-origin" allow-origin
+             "access-control-allow-credentials" "true"
+             "access-control-allow-methods" "OPTIONS,GET,PUT,DELETE,PROPFIND,REPORT,MOVE,COPY,PROPPATCH,MKCOL"
+             "access-control-allow-headers" "Content-Type,Depth,Cache-Control,X-Requested-With,If-Modified-Since,If-Match,If,X-File-Name,X-File-Size,Destination,Overwrite,Authorization"
+             "dav" "2"}]
+    (fn [req]
+      (if (= :options (:request-method req))
+        {:status 204 :headers hdr}
+        (update-in (h req) [:headers] #(merge hdr %))))))
 
 ;; Quick and embedded dav server
 
